@@ -1,6 +1,6 @@
 # swell
 
-A terminal audio editor for WAV and MP3 (also reads FLAC and AIFF).
+A terminal audio editor for WAV and MP3 (also reads FLAC, AIFF and M4A/AAC).
 
 ```
 cargo build --release
@@ -12,11 +12,11 @@ Inside the editor press `?` for the full key reference.
 ## What it does
 
 - **Load / save / save as** by extension: `.wav` (16/24/32-bit, matching the source) or `.mp3` (LAME, 192 kbps).
-- **Waveform view** with per-channel lanes, zoom (`+` `-` `0` `z`, mouse wheel) and scrolling.
+- **Waveform view** with per-channel lanes, zoom (`↑` `↓` `0` `z`, mouse wheel) and scrolling.
 - **Select** with Shift+arrows, `[` `]`, `a`, or mouse drag.
 - **Loop**: `l` turns the selection into a loop region; Space plays it round and round.
 - **Play / pause / stop**: Space / Space / Enter. Plays the selection (looped when it is the loop region), else the loop, else from the cursor.
-- **Speed slider**: 50–200% in 1% steps with `↑` `↓` (Shift for ±10%, `1` resets), or click, drag and wheel on the track. Tape-style varispeed, so pitch follows speed.
+- **Speed slider**: 50–200% in 1% steps with `-` `=` (`_` `+` for ±10%, `1` resets), or click, drag and wheel on the track. Tape-style varispeed, so pitch follows speed.
 - **Edit**: cut, copy, paste, delete, trim to selection, with undo/redo.
 - **Command palette** (`:` or Ctrl+P): fuzzy-search every command and effect, VS Code style. Shortcuts are shown beside each entry. Effects with parameters prompt for them with defaults prefilled, comma separated.
 - **45 effects** (selection, or whole file when nothing is selected; undoable):
@@ -55,7 +55,7 @@ Bar numbering follows DAW convention with the file at bar 1: a partial lead-in b
 | `W` | save as |
 | `e` / `E` | export pieces / export selection |
 | `Space` / `Enter` | play-pause / stop |
-| `↑` `↓` / `1` | playback speed ±1% (Shift ±10%) / reset to 100% |
+| `-` `=` / `1` | playback speed ±1% (`_` `+` ±10%) / reset to 100% |
 | `p` | move cursor to playhead |
 | `← →` (`Shift` extends, `Ctrl` ×10) | move cursor / select |
 | `Home` `End` `[` `]` `a` `Esc` | go to start/end, set selection start/end, select all, clear |
@@ -64,7 +64,7 @@ Bar numbering follows DAW convention with the file at bar 1: a partial lead-in b
 | `x` `c` `v` `Del` `t` | cut, copy, paste, delete, trim |
 | `u` / `U` | undo / redo |
 | `f` `F` `n` `r` | fade in, fade out, normalize, reverse |
-| `+` `-` `0` `z` | zoom in, out, fit, to selection |
+| `↑` `↓` `0` `z` | zoom in, out, fit, to selection |
 | `PgUp` `PgDn` | scroll |
 | `:` / `Ctrl+P` | command palette |
 | `b` / `B` / `g` | mark bar start / bar end at cursor / bar = selection |
@@ -123,3 +123,8 @@ src/main.rs    terminal setup and event loop
 ### v1
 
 - initial release
+
+### v1.0.1
+
+- added support for m4a
+- changed speed/zoom

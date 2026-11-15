@@ -1485,6 +1485,8 @@ impl App {
             Cmd::Redo => self.redo(),
             Cmd::SpeedUp => self.nudge_speed(1),
             Cmd::SpeedDown => self.nudge_speed(-1),
+            Cmd::SpeedUpBig => self.nudge_speed(10),
+            Cmd::SpeedDownBig => self.nudge_speed(-10),
             Cmd::SpeedReset => self.set_speed(100),
             Cmd::KeepAliveToggle => {
                 let mode = self.player.keep_alive().next();
@@ -1676,7 +1678,6 @@ impl App {
         let alt = key.modifiers.contains(KeyModifiers::ALT);
         let col_frames = self.fpc.max(1.0) as i64;
         let step = if ctrl || alt { col_frames * 10 } else { col_frames };
-        let big = shift || ctrl || alt;
 
         // Keys that need modifier/context handling the command table can't express.
         let snap_grid = if self.snap { self.grid } else { None };
@@ -1691,8 +1692,8 @@ impl App {
             KeyCode::Right => return self.move_cursor(step, shift),
             KeyCode::Home => return self.set_cursor(0, shift),
             KeyCode::End => return self.set_cursor(self.audio.frames(), shift),
-            KeyCode::Up => return self.nudge_speed(if big { 10 } else { 1 }),
-            KeyCode::Down => return self.nudge_speed(if big { -10 } else { -1 }),
+            KeyCode::Up => return self.zoom_cursor(0.5),
+            KeyCode::Down => return self.zoom_cursor(2.0),
             KeyCode::Esc => {
                 return if self.transport_active() { self.stop() } else { self.run_cmd(Cmd::ClearSelection, false) };
             }

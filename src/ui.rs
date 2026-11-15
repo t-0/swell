@@ -483,7 +483,7 @@ fn draw_speed(app: &mut App, area: Rect, buf: &mut Buffer) {
     let label = format!(" speed {:>3}% ", app.speed);
     let left = format!("{SPEED_MIN}% ");
     let right = format!(" {SPEED_MAX}%");
-    let hint = "   ↑↓ ±1%  ⇧↑↓ ±10%  1 reset  (pitch follows speed)";
+    let hint = "   -/= ±1%  _/+ ±10%  1 reset  (pitch follows speed)";
     let fixed = (label.len() + left.len() + right.len()) as u16;
     let hint_w = if area.width > fixed + 60 { hint.chars().count() as u16 } else { 0 };
     let track_w = area.width.saturating_sub(fixed + hint_w).clamp(0, 61);
@@ -618,7 +618,8 @@ fn draw_keys(area: Rect, buf: &mut Buffer) {
         ("A", "analyse"),
         ("s", "snap"),
         (":", "palette"),
-        ("↑↓", "speed"),
+        ("↑↓", "zoom"),
+        ("-/=", "speed"),
         ("e", "export pieces"),
         ("w", "save"),
         ("u", "undo"),
@@ -661,7 +662,7 @@ fn draw_help(area: Rect, buf: &mut Buffer) {
         ("COMMAND PALETTE", ""),
         (":  /  Ctrl+P", "open the palette: fuzzy-search every command and all 45 effects"),
         ("FILES", ""),
-        ("o", "open a .wav / .mp3 / .flac / .aiff file"),
+        ("o", "open a .wav / .mp3 / .flac / .aiff / .m4a file"),
         ("w  /  Ctrl+S", "save (same file; format by extension)"),
         ("W", "save as (.wav or .mp3)"),
         ("E", "export selection to a new file"),
@@ -671,7 +672,7 @@ fn draw_help(area: Rect, buf: &mut Buffer) {
         ("Space", "play / pause: selection (looped if it is the loop), else loop, else from cursor"),
         ("Enter", "stop"),
         ("p", "move cursor to playhead"),
-        ("↑ / ↓", "playback speed ±1%  (Shift: ±10%),  1 = back to 100%"),
+        ("- / =", "playback speed ±1%  (_ / +: ±10%),  1 = back to 100%"),
         ("mouse on slider", "click / drag / wheel to set speed (50–200%, pitch follows)"),
         ("NAVIGATE & SELECT", ""),
         ("← →", "move cursor one column   (Ctrl/Alt: ×10)"),
@@ -681,7 +682,7 @@ fn draw_help(area: Rect, buf: &mut Buffer) {
         ("a", "select all"),
         ("Esc", "stop playback, else clear selection"),
         ("mouse", "click = cursor, drag = select, wheel = zoom"),
-        ("+ / -  /  0  /  z", "zoom in / out  /  fit  /  zoom to selection"),
+        ("↑ / ↓  /  0  /  z", "zoom in / out  /  fit  /  zoom to selection"),
         ("PgUp / PgDn  , .", "scroll"),
         ("LOOP & SLICES", ""),
         ("l  /  L", "loop = selection (toggle; applies while playing)  /  clear loop"),

@@ -180,7 +180,7 @@ pub struct Loaded {
     pub bits: u16,
 }
 
-/// Decode any format symphonia understands (wav, mp3, flac, aiff) to f32.
+/// Decode any format symphonia understands (wav, mp3, flac, aiff, m4a/aac/alac) to f32.
 pub fn load(path: &Path) -> Result<Loaded> {
     use symphonia::core::audio::SampleBuffer;
     use symphonia::core::codecs::{DecoderOptions, CODEC_TYPE_NULL};

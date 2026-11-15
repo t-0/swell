@@ -1,7 +1,7 @@
 [package]
 name = "swell"
-version = "0.1.0"
-edition = "2021"
+version = "1.0.1"
+edition = "2024"
 description = "A terminal WAV/MP3 audio editor"
 license = "MIT"
 
@@ -10,7 +10,7 @@ anyhow = "1"
 ratatui = "0.29"
 crossterm = "0.28"
 cpal = "0.15"
-symphonia = { version = "0.5", default-features = false, features = ["mp3", "wav", "pcm", "adpcm", "aiff", "flac"] }
+symphonia = { version = "0.5", default-features = false, features = ["mp3", "wav", "pcm", "adpcm", "aiff", "flac", "isomp4", "aac", "alac"] }
 mp3lame-encoder = "0.2"
 serde = { version = "1", features = ["derive"] }
 toml = "0.8"

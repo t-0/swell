@@ -197,9 +197,16 @@ pub fn load(path: &Path) -> Result<Loaded> {
         hint.with_extension(ext);
     }
     let mut format = symphonia::default::get_probe()
-        .probe(&hint, mss, FormatOptions::default(), MetadataOptions::default())
+        .probe(
+            &hint,
+            mss,
+            FormatOptions::default(),
+            MetadataOptions::default(),
+        )
         .with_context(|| format!("unrecognised audio format: {}", path.display()))?;
-    let track = format.default_track(TrackType::Audio).ok_or_else(|| anyhow!("no audio track found"))?;
+    let track = format
+        .default_track(TrackType::Audio)
+        .ok_or_else(|| anyhow!("no audio track found"))?;
     let track_id = track.id;
     let params = track
         .codec_params
@@ -237,7 +244,8 @@ pub fn load(path: &Path) -> Result<Loaded> {
         match decoder.decode(&packet) {
             Ok(decoded) => {
                 let spec = decoded.spec();
-                let a = audio.get_or_insert_with(|| Audio::new(spec.rate(), spec.channels().count()));
+                let a =
+                    audio.get_or_insert_with(|| Audio::new(spec.rate(), spec.channels().count()));
                 decoded.copy_to_vecs_planar::<f32>(&mut planes);
                 for (dst, src) in a.channels.iter_mut().zip(&planes) {
                     dst.extend_from_slice(src);

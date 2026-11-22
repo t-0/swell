@@ -35,6 +35,8 @@ pub struct Editor {
     pub normalize_db: f64,
     pub speed: u32,
     pub snap: bool,
+    /// Keep the playhead centred while playing.
+    pub follow: bool,
     pub undo_levels: usize,
     pub mp3_kbps: u32,
     /// "source", "16", "24" or "32"
@@ -51,6 +53,7 @@ impl Default for Editor {
             normalize_db: 0.0,
             speed: 100,
             snap: false,
+            follow: false,
             undo_levels: 32,
             mp3_kbps: 192,
             wav_bits: "source".into(),
@@ -241,6 +244,8 @@ pub fn default_file_text() -> String {
 # speed = 100
 # Start with snap-to-grid on (needs a grid).
 # snap = false
+# Follow the playhead: keep it centred while playing (clamped at the ends).
+# follow = false
 # undo_levels = 32
 # MP3 bitrate for .mp3 saves: 8..320 (nearest standard rate is used).
 # mp3_kbps = 192

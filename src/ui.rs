@@ -214,7 +214,10 @@ fn draw_title(app: &App, area: Rect, buf: &mut Buffer) {
     let line = Line::from(vec![
         Span::styled(
             " swell ",
-            style.add_modifier(Modifier::BOLD).fg(Color::Cyan),
+            style
+                .add_modifier(Modifier::BOLD)
+                .fg(Color::Black)
+                .bg(Color::Cyan),
         ),
         Span::styled(
             transport,
@@ -712,6 +715,9 @@ fn draw_status(app: &App, area: Rect, buf: &mut Buffer) {
             style.fg(PLAYHEAD_FG),
         ));
     }
+    if app.follow {
+        spans.push(Span::styled("│ follow ", style.fg(PLAYHEAD_FG)));
+    }
     Paragraph::new(Line::from(spans))
         .style(style)
         .render(area, buf);
@@ -858,6 +864,7 @@ fn draw_help(area: Rect, buf: &mut Buffer) {
         ),
         ("Enter", "stop"),
         ("p", "move cursor to playhead"),
+        ("P", "follow: keep the playhead centred while playing"),
         (
             "- / =",
             "playback speed ±1%  (_ / +: ±10%),  1 = back to 100%",

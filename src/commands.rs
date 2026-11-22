@@ -35,6 +35,7 @@ pub enum Cmd {
     ZoomSel,
     ScrollLeft,
     ScrollRight,
+    FollowToggle,
     Cut,
     Copy,
     Paste,
@@ -206,6 +207,12 @@ const BASE: &[CommandInfo] = &[
     c(Cmd::ScrollLeft, "scroll_left", "Scroll left", "view"),
     c(Cmd::ScrollRight, "scroll_right", "Scroll right", "view"),
     c(
+        Cmd::FollowToggle,
+        "follow_toggle",
+        "Follow playhead: keep it centred while playing (toggle)",
+        "view",
+    ),
+    c(
         Cmd::GridBarStart,
         "grid_bar_start",
         "Mark bar start = cursor (downbeat)",
@@ -361,6 +368,7 @@ pub const DEFAULT_KEYS: &[(&str, Cmd)] = &[
     ("space", Cmd::PlayPause),
     ("enter", Cmd::Stop),
     ("p", Cmd::CursorToPlayhead),
+    ("P", Cmd::FollowToggle),
     ("1", Cmd::SpeedReset),
     ("[", Cmd::SelStartHere),
     ("]", Cmd::SelEndHere),

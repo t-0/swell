@@ -66,6 +66,7 @@ Bar numbering follows DAW convention with the file at bar 1: a partial lead-in b
 | `f` `F` `n` `r` | fade in, fade out, normalize, reverse |
 | `↑` `↓` `0` `z` | zoom in, out, fit, to selection |
 | `PgUp` `PgDn` | scroll |
+| `P` | follow playhead (keep it centred while playing) |
 | `R` | cycle waveform rendering (blocks, quads, sextants, braille, ascii) |
 | `:` / `Ctrl+P` | command palette |
 | `b` / `B` / `g` | mark bar start / bar end at cursor / bar = selection |
@@ -92,6 +93,7 @@ beats_per_bar = 4
 normalize_db = 0.0      # target for the quick n key
 speed = 100             # playback speed at start, 50..200
 snap = false
+follow = false          # keep the playhead centred while playing
 undo_levels = 32
 mp3_kbps = 192
 wav_bits = "source"     # or "16" | "24" | "32"
@@ -135,3 +137,9 @@ src/main.rs    terminal setup and event loop
 - added new waveform rendering modes and cycling command
 - dependency updates
 - formatting
+
+### v1.0.3
+
+- added cursor follow mode
+- added --version
+- highlight program name as per vinyl

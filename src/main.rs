@@ -19,9 +19,13 @@ use std::time::Duration;
 
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.iter().any(|a| a == "-V" || a == "--version") {
+        println!("swell version {}", env!("CARGO_PKG_VERSION"));
+        return Ok(());
+    }
     if args.iter().any(|a| a == "-h" || a == "--help") {
         println!(
-            "usage: swell [FILE.wav|FILE.mp3]\n\nA terminal audio editor. Press ? inside for the key reference.\nSettings and key bindings: ~/.swell.toml (or $SWELL_CONFIG), created on first run."
+            "usage: swell [FILE.wav|FILE.mp3]\n       swell --version\n\nA terminal audio editor. Press ? inside for the key reference.\nSettings and key bindings: ~/.swell.toml (or $SWELL_CONFIG), created on first run."
         );
         return Ok(());
     }

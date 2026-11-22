@@ -109,6 +109,8 @@ pub struct App {
     pub bar_start: Option<usize>,
     pub bar_end: Option<usize>,
     pub snap: bool,
+    /// Keep the playhead centred in the view while playing.
+    pub follow: bool,
     pub view_start: usize,
     pub fpc: f64,
     pub wave_area: Rect,
@@ -160,6 +162,7 @@ impl App {
             bar_start: None,
             bar_end: None,
             snap: false,
+            follow: false,
             view_start: 0,
             fpc: 1.0,
             wave_area: Rect::default(),
@@ -219,6 +222,7 @@ impl App {
         if c.editor.snap && self.grid.is_some() {
             self.snap = true;
         }
+        self.follow = c.editor.follow;
         self.undo.truncate(c.editor.undo_levels.max(1));
         self.render = WaveRender::parse(&c.editor.render).unwrap_or_default();
     }
@@ -1401,7 +1405,20 @@ impl App {
             self.zoom_fit();
             self.needs_fit = false;
         }
+        self.follow_playhead();
         self.clamp_view();
+    }
+
+    /// In follow mode, centre the view on the playhead; `clamp_view` pins it
+    /// at the start/end of the file so the playhead drifts to the edge there.
+    fn follow_playhead(&mut self) {
+        if !self.follow {
+            return;
+        }
+        if let Some(p) = self.playhead() {
+            let half = (self.fpc * self.width() as f64 / 2.0) as usize;
+            self.view_start = p.saturating_sub(half);
+        }
     }
 
     fn fit_fpc(&self) -> f64 {
@@ -1753,6 +1770,14 @@ impl App {
                 let mode = self.player.keep_alive().next();
                 self.player.set_keep_alive(mode);
                 self.info(format!("Output keep-alive {}", mode.label()));
+            }
+            Cmd::FollowToggle => {
+                self.follow = !self.follow;
+                self.info(if self.follow {
+                    "Follow on: view keeps the playhead centred while playing"
+                } else {
+                    "Follow off"
+                });
             }
             Cmd::RenderCycle => {
                 self.render = self.render.next();

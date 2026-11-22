@@ -12,7 +12,7 @@ Inside the editor press `?` for the full key reference.
 ## What it does
 
 - **Load / save / save as** by extension: `.wav` (16/24/32-bit, matching the source) or `.mp3` (LAME, 192 kbps).
-- **Waveform view** with per-channel lanes, zoom (`↑` `↓` `0` `z`, mouse wheel) and scrolling.
+- **Waveform view** with per-channel lanes, zoom (`↑` `↓` `0` `z`, mouse wheel) and scrolling. Five rendering styles (`R` cycles, `editor.render` sets the default): half `blocks`, `quads` (2×2), `sextants` (2×3), `braille` (2×4 dots) and `ascii`; the two-wide grids show twice the horizontal detail.
 - **Select** with Shift+arrows, `[` `]`, `a`, or mouse drag.
 - **Loop**: `l` turns the selection into a loop region; Space plays it round and round.
 - **Play / pause / stop**: Space / Space / Enter. Plays the selection (looped when it is the loop region), else the loop, else from the cursor.
@@ -66,6 +66,7 @@ Bar numbering follows DAW convention with the file at bar 1: a partial lead-in b
 | `f` `F` `n` `r` | fade in, fade out, normalize, reverse |
 | `↑` `↓` `0` `z` | zoom in, out, fit, to selection |
 | `PgUp` `PgDn` | scroll |
+| `R` | cycle waveform rendering (blocks, quads, sextants, braille, ascii) |
 | `:` / `Ctrl+P` | command palette |
 | `b` / `B` / `g` | mark bar start / bar end at cursor / bar = selection |
 | `A` | beat analysis (seeded by the marked bar) |
@@ -128,3 +129,9 @@ src/main.rs    terminal setup and event loop
 
 - added support for m4a
 - changed speed/zoom
+
+### v1.0.2
+
+- added new waveform rendering modes and cycling command
+- dependency updates
+- formatting

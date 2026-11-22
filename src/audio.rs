@@ -1,6 +1,6 @@
 //! Audio buffer, file I/O (WAV/MP3/FLAC/AIFF decode, WAV/MP3 encode) and effects.
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 use std::path::Path;
 
 /// Number of frames summarised per peak block (used for fast zoomed-out drawing).
@@ -182,13 +182,13 @@ pub struct Loaded {
 
 /// Decode any format symphonia understands (wav, mp3, flac, aiff, m4a/aac/alac) to f32.
 pub fn load(path: &Path) -> Result<Loaded> {
-    use symphonia::core::audio::SampleBuffer;
-    use symphonia::core::codecs::{DecoderOptions, CODEC_TYPE_NULL};
+    use symphonia::core::codecs::audio::AudioDecoderOptions;
+    use symphonia::core::codecs::audio::well_known::{CODEC_ID_PCM_F32BE, CODEC_ID_PCM_F32LE};
     use symphonia::core::errors::Error as SymErr;
-    use symphonia::core::formats::FormatOptions;
+    use symphonia::core::formats::probe::Hint;
+    use symphonia::core::formats::{FormatOptions, TrackType};
     use symphonia::core::io::MediaSourceStream;
     use symphonia::core::meta::MetadataOptions;
-    use symphonia::core::probe::Hint;
 
     let file = std::fs::File::open(path).with_context(|| format!("open {}", path.display()))?;
     let mss = MediaSourceStream::new(Box::new(file), Default::default());
@@ -196,38 +196,34 @@ pub fn load(path: &Path) -> Result<Loaded> {
     if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
         hint.with_extension(ext);
     }
-    let fmt_opts = FormatOptions {
-        enable_gapless: true,
-        ..Default::default()
-    };
-    let probed = symphonia::default::get_probe()
-        .format(&hint, mss, &fmt_opts, &MetadataOptions::default())
+    let mut format = symphonia::default::get_probe()
+        .probe(&hint, mss, FormatOptions::default(), MetadataOptions::default())
         .with_context(|| format!("unrecognised audio format: {}", path.display()))?;
-    let mut format = probed.format;
-    let track = format
-        .tracks()
-        .iter()
-        .find(|t| t.codec_params.codec != CODEC_TYPE_NULL)
-        .ok_or_else(|| anyhow!("no audio track found"))?;
+    let track = format.default_track(TrackType::Audio).ok_or_else(|| anyhow!("no audio track found"))?;
     let track_id = track.id;
-    let bits = if track.codec_params.codec == symphonia::core::codecs::CODEC_TYPE_PCM_F32LE
-        || track.codec_params.codec == symphonia::core::codecs::CODEC_TYPE_PCM_F32BE
-    {
+    let params = track
+        .codec_params
+        .as_ref()
+        .and_then(|p| p.audio())
+        .ok_or_else(|| anyhow!("no audio track found"))?
+        .clone();
+    let bits = if params.codec == CODEC_ID_PCM_F32LE || params.codec == CODEC_ID_PCM_F32BE {
         32
     } else {
-        track.codec_params.bits_per_sample.unwrap_or(16) as u16
+        params.bits_per_sample.unwrap_or(16) as u16
     };
+    // gapless (encoder delay / padding trimmed) is on by default
     let mut decoder = symphonia::default::get_codecs()
-        .make(&track.codec_params, &DecoderOptions::default())
+        .make_audio_decoder(&params, &AudioDecoderOptions::default())
         .context("unsupported codec")?;
 
     let mut audio: Option<Audio> = None;
-    let mut sample_buf: Option<SampleBuffer<f32>> = None;
-    let mut buf_frames = 0u64;
+    let mut planes: Vec<Vec<f32>> = Vec::new();
 
     loop {
         let packet = match format.next_packet() {
-            Ok(p) => p,
+            Ok(Some(p)) => p,
+            Ok(None) => break,
             Err(SymErr::IoError(e)) if e.kind() == std::io::ErrorKind::UnexpectedEof => break,
             Err(SymErr::ResetRequired) => {
                 decoder.reset();
@@ -235,23 +231,16 @@ pub fn load(path: &Path) -> Result<Loaded> {
             }
             Err(e) => return Err(e.into()),
         };
-        if packet.track_id() != track_id {
+        if packet.track_id != track_id {
             continue;
         }
         match decoder.decode(&packet) {
             Ok(decoded) => {
-                let spec = *decoded.spec();
-                let cap = decoded.capacity() as u64;
-                let a = audio.get_or_insert_with(|| Audio::new(spec.rate, spec.channels.count()));
-                if sample_buf.is_none() || cap > buf_frames {
-                    sample_buf = Some(SampleBuffer::<f32>::new(cap, spec));
-                    buf_frames = cap;
-                }
-                let sb = sample_buf.as_mut().unwrap();
-                sb.copy_interleaved_ref(decoded);
-                let nc = a.n_channels();
-                for (i, v) in sb.samples().iter().enumerate() {
-                    a.channels[i % nc].push(*v);
+                let spec = decoded.spec();
+                let a = audio.get_or_insert_with(|| Audio::new(spec.rate(), spec.channels().count()));
+                decoded.copy_to_vecs_planar::<f32>(&mut planes);
+                for (dst, src) in a.channels.iter_mut().zip(&planes) {
+                    dst.extend_from_slice(src);
                 }
             }
             Err(SymErr::DecodeError(_)) => continue, // skip corrupt frame
@@ -290,7 +279,13 @@ pub fn save(audio: &Audio, path: &Path, bits: u16, meta: &WavMeta) -> Result<()>
 }
 
 /// Write by file extension: `.wav` or `.mp3`, with the MP3 bitrate in kbps.
-pub fn save_with(audio: &Audio, path: &Path, bits: u16, meta: &WavMeta, mp3_kbps: u32) -> Result<()> {
+pub fn save_with(
+    audio: &Audio,
+    path: &Path,
+    bits: u16,
+    meta: &WavMeta,
+    mp3_kbps: u32,
+) -> Result<()> {
     let ext = path
         .extension()
         .and_then(|e| e.to_str())
@@ -349,7 +344,9 @@ pub fn save_wav(audio: &Audio, path: &Path, bits: u16, meta: &WavMeta) -> Result
         for c in &audio.channels {
             let v = c[i];
             match bits {
-                16 => data.extend_from_slice(&((v.clamp(-1.0, 1.0) * 32767.0).round() as i16).to_le_bytes()),
+                16 => data.extend_from_slice(
+                    &((v.clamp(-1.0, 1.0) * 32767.0).round() as i16).to_le_bytes(),
+                ),
                 24 => {
                     let q = (v.clamp(-1.0, 1.0) * 8_388_607.0).round() as i32;
                     data.extend_from_slice(&q.to_le_bytes()[..3]);
@@ -397,7 +394,9 @@ pub fn save_wav(audio: &Audio, path: &Path, bits: u16, meta: &WavMeta) -> Result
         chunk(&mut body, b"LIST", &adtl);
     }
 
-    let mut f = std::io::BufWriter::new(std::fs::File::create(path).with_context(|| format!("create {}", path.display()))?);
+    let mut f = std::io::BufWriter::new(
+        std::fs::File::create(path).with_context(|| format!("create {}", path.display()))?,
+    );
     f.write_all(b"RIFF")?;
     f.write_all(&((body.len() + 4) as u32).to_le_bytes())?;
     f.write_all(b"WAVE")?;
@@ -411,7 +410,9 @@ pub fn save_wav(audio: &Audio, path: &Path, bits: u16, meta: &WavMeta) -> Result
 pub fn read_wav_meta(path: &Path) -> WavMeta {
     use std::io::{Read, Seek, SeekFrom};
     let mut meta = WavMeta::default();
-    let Ok(mut f) = std::fs::File::open(path) else { return meta };
+    let Ok(mut f) = std::fs::File::open(path) else {
+        return meta;
+    };
     let mut hdr = [0u8; 12];
     if f.read_exact(&mut hdr).is_err() || &hdr[0..4] != b"RIFF" || &hdr[8..12] != b"WAVE" {
         return meta;
@@ -478,7 +479,11 @@ pub fn read_wav_meta(path: &Path) -> WavMeta {
     meta.cues = cues
         .into_iter()
         .map(|(id, frame)| {
-            let label = labels.iter().find(|(lid, _)| *lid == id).map(|(_, l)| l.clone()).unwrap_or_default();
+            let label = labels
+                .iter()
+                .find(|(lid, _)| *lid == id)
+                .map(|(_, l)| l.clone())
+                .unwrap_or_default();
             (frame, label)
         })
         .collect();
@@ -489,17 +494,34 @@ pub fn save_mp3(audio: &Audio, path: &Path, kbps: u32) -> Result<()> {
     use mp3lame_encoder::{Bitrate, Builder, DualPcm, FlushNoGap, MonoPcm, Quality};
 
     const RATES: [(u32, Bitrate); 16] = [
-        (8, Bitrate::Kbps8), (16, Bitrate::Kbps16), (24, Bitrate::Kbps24), (32, Bitrate::Kbps32),
-        (40, Bitrate::Kbps40), (48, Bitrate::Kbps48), (64, Bitrate::Kbps64), (80, Bitrate::Kbps80),
-        (96, Bitrate::Kbps96), (112, Bitrate::Kbps112), (128, Bitrate::Kbps128), (160, Bitrate::Kbps160),
-        (192, Bitrate::Kbps192), (224, Bitrate::Kbps224), (256, Bitrate::Kbps256), (320, Bitrate::Kbps320),
+        (8, Bitrate::Kbps8),
+        (16, Bitrate::Kbps16),
+        (24, Bitrate::Kbps24),
+        (32, Bitrate::Kbps32),
+        (40, Bitrate::Kbps40),
+        (48, Bitrate::Kbps48),
+        (64, Bitrate::Kbps64),
+        (80, Bitrate::Kbps80),
+        (96, Bitrate::Kbps96),
+        (112, Bitrate::Kbps112),
+        (128, Bitrate::Kbps128),
+        (160, Bitrate::Kbps160),
+        (192, Bitrate::Kbps192),
+        (224, Bitrate::Kbps224),
+        (256, Bitrate::Kbps256),
+        (320, Bitrate::Kbps320),
     ];
-    let bitrate = RATES.iter().min_by_key(|(k, _)| k.abs_diff(kbps)).map(|(_, b)| *b).unwrap_or(Bitrate::Kbps192);
+    let bitrate = RATES
+        .iter()
+        .min_by_key(|(k, _)| k.abs_diff(kbps))
+        .map(|(_, b)| *b)
+        .unwrap_or(Bitrate::Kbps192);
 
     let nc = audio.n_channels();
     let mut b = Builder::new().ok_or_else(|| anyhow!("could not create LAME encoder"))?;
     let lame = |e: mp3lame_encoder::BuildError| anyhow!("LAME: {e}");
-    b.set_num_channels(if nc == 1 { 1 } else { 2 }).map_err(lame)?;
+    b.set_num_channels(if nc == 1 { 1 } else { 2 })
+        .map_err(lame)?;
     b.set_sample_rate(audio.sample_rate).map_err(lame)?;
     b.set_brate(bitrate).map_err(lame)?;
     b.set_quality(Quality::Best).map_err(lame)?;
@@ -509,7 +531,8 @@ pub fn save_mp3(audio: &Audio, path: &Path, kbps: u32) -> Result<()> {
     out.reserve(mp3lame_encoder::max_required_buffer_size(audio.frames()) + 8192);
     let enc_err = |e: mp3lame_encoder::EncodeError| anyhow!("LAME encode: {e}");
     if nc == 1 {
-        enc.encode_to_vec(MonoPcm(&audio.channels[0]), &mut out).map_err(enc_err)?;
+        enc.encode_to_vec(MonoPcm(&audio.channels[0]), &mut out)
+            .map_err(enc_err)?;
     } else {
         // Downmix anything beyond stereo into L/R.
         let (left, right): (Vec<f32>, Vec<f32>) = if nc == 2 {
@@ -526,7 +549,14 @@ pub fn save_mp3(audio: &Audio, path: &Path, kbps: u32) -> Result<()> {
             }
             (l, r)
         };
-        enc.encode_to_vec(DualPcm { left: &left, right: &right }, &mut out).map_err(enc_err)?;
+        enc.encode_to_vec(
+            DualPcm {
+                left: &left,
+                right: &right,
+            },
+            &mut out,
+        )
+        .map_err(enc_err)?;
     }
     enc.flush_to_vec::<FlushNoGap>(&mut out).map_err(enc_err)?;
     std::fs::write(path, &out).with_context(|| format!("write {}", path.display()))?;
@@ -550,7 +580,8 @@ mod tests {
         for c in 0..nc {
             for i in 0..frames {
                 let t = i as f32 / 8000.0;
-                a.channels[c].push(0.5 * (t * 440.0 * (c as f32 + 1.0) * std::f32::consts::TAU).sin());
+                a.channels[c]
+                    .push(0.5 * (t * 440.0 * (c as f32 + 1.0) * std::f32::consts::TAU).sin());
             }
         }
         a
@@ -631,8 +662,17 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let a = tone(4000, 2);
         let meta = WavMeta {
-            acid: Some(AcidInfo { bpm: 128.5, beats: 16, num: 4, denom: 4 }),
-            cues: vec![(0, "Bar 1".into()), (1234, "Slice 1".into()), (3999, "odd".into())],
+            acid: Some(AcidInfo {
+                bpm: 128.5,
+                beats: 16,
+                num: 4,
+                denom: 4,
+            }),
+            cues: vec![
+                (0, "Bar 1".into()),
+                (1234, "Slice 1".into()),
+                (3999, "odd".into()),
+            ],
         };
         let p = dir.join("m.wav");
         save(&a, &p, 24, &meta).unwrap();

@@ -19,7 +19,12 @@ pub struct Output {
 
 impl Default for Output {
     fn default() -> Self {
-        Output { keep_alive: "tone".into(), dither_db: -96.0, tone_db: -60.0, tone_hz: 15.0 }
+        Output {
+            keep_alive: "tone".into(),
+            dither_db: -96.0,
+            tone_db: -60.0,
+            tone_hz: 15.0,
+        }
     }
 }
 
@@ -35,6 +40,8 @@ pub struct Editor {
     /// "source", "16", "24" or "32"
     pub wav_bits: String,
     pub mouse: bool,
+    /// Waveform drawing: "blocks", "quads", "sextants", "braille" or "ascii"
+    pub render: String,
 }
 
 impl Default for Editor {
@@ -48,6 +55,7 @@ impl Default for Editor {
             mp3_kbps: 192,
             wav_bits: "source".into(),
             mouse: true,
+            render: "blocks".into(),
         }
     }
 }
@@ -90,12 +98,21 @@ pub fn load() -> Loaded {
             Ok(()) => created = true,
             Err(e) => warnings.push(format!("could not create {}: {e}", path.display())),
         }
-        return Loaded { config: Config::default(), path, created, parsed: true, warnings };
+        return Loaded {
+            config: Config::default(),
+            path,
+            created,
+            parsed: true,
+            warnings,
+        };
     }
     let (config, parsed) = match read(&path) {
         Ok(c) => (c, true),
         Err(e) => {
-            let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            let name = path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
             warnings.push(format!("{name} ignored, {e:#}"));
             (Config::default(), false)
         }
@@ -103,24 +120,40 @@ pub fn load() -> Loaded {
     for w in validate(&config) {
         warnings.push(w);
     }
-    Loaded { config, path, created, parsed, warnings }
+    Loaded {
+        config,
+        path,
+        created,
+        parsed,
+        warnings,
+    }
 }
 
 fn read(path: &std::path::Path) -> Result<Config> {
     let text = std::fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
-    let cfg: Config = toml::from_str(&text).map_err(|e| anyhow::anyhow!("{}", short_toml_error(&e.to_string())))?;
+    let cfg: Config = toml::from_str(&text)
+        .map_err(|e| anyhow::anyhow!("{}", short_toml_error(&e.to_string())))?;
     Ok(cfg)
 }
 
 /// Collapse toml's multi-line diagnostic into "line N: reason".
 fn short_toml_error(full: &str) -> String {
-    let lines: Vec<&str> = full.lines().map(|l| l.trim()).filter(|l| !l.is_empty()).collect();
+    let lines: Vec<&str> = full
+        .lines()
+        .map(|l| l.trim())
+        .filter(|l| !l.is_empty())
+        .collect();
     let loc = lines
         .first()
         .and_then(|l| l.strip_prefix("TOML parse error at "))
         .map(|l| l.split(',').next().unwrap_or(l).to_string())
         .unwrap_or_default();
-    let reason = lines.iter().rev().find(|l| !l.starts_with('|') && !l.starts_with('^') && !l.contains("| ")).copied().unwrap_or("parse error");
+    let reason = lines
+        .iter()
+        .rev()
+        .find(|l| !l.starts_with('|') && !l.starts_with('^') && !l.contains("| "))
+        .copied()
+        .unwrap_or("parse error");
     let reason: String = reason.chars().take(90).collect();
     if loc.is_empty() {
         reason
@@ -132,10 +165,22 @@ fn short_toml_error(full: &str) -> String {
 fn validate(c: &Config) -> Vec<String> {
     let mut w = Vec::new();
     if !matches!(c.output.keep_alive.as_str(), "off" | "dither" | "tone") {
-        w.push(format!("output.keep_alive = {:?} is not off/dither/tone", c.output.keep_alive));
+        w.push(format!(
+            "output.keep_alive = {:?} is not off/dither/tone",
+            c.output.keep_alive
+        ));
     }
     if !matches!(c.editor.wav_bits.as_str(), "source" | "16" | "24" | "32") {
-        w.push(format!("editor.wav_bits = {:?} is not source/16/24/32", c.editor.wav_bits));
+        w.push(format!(
+            "editor.wav_bits = {:?} is not source/16/24/32",
+            c.editor.wav_bits
+        ));
+    }
+    if crate::render::WaveRender::parse(&c.editor.render).is_none() {
+        w.push(format!(
+            "editor.render = {:?} is not blocks/quads/sextants/braille/ascii",
+            c.editor.render
+        ));
     }
     if !(50..=200).contains(&c.editor.speed) {
         w.push("editor.speed must be 50..200".into());
@@ -158,7 +203,9 @@ pub fn keymap(c: &Config) -> HashMap<KeyChord, Cmd> {
         .filter_map(|(k, cmd)| commands::parse_key(k).map(|chord| (chord, *cmd)))
         .collect();
     for (k, v) in &c.keys {
-        let Some(chord) = commands::parse_key(k) else { continue };
+        let Some(chord) = commands::parse_key(k) else {
+            continue;
+        };
         if v == "none" {
             map.remove(&chord);
         } else if let Some(cmd) = commands::by_id(v) {
@@ -201,6 +248,11 @@ pub fn default_file_text() -> String {
 # wav_bits = "source"
 # Mouse: click sets cursor, drag selects, wheel zooms.
 # mouse = true
+# Waveform drawing: blocks (half blocks, the default), quads (2×2),
+# sextants (2×3), braille (2×4 dots) or ascii. Finer grids show more
+# detail; sextants need a font with Unicode 13 block characters.
+# Cycle live with R.
+# render = "blocks"
 
 [keys]
 # key = "command id". Keys: a letter or symbol (upper case = shift), or
@@ -212,7 +264,11 @@ pub fn default_file_text() -> String {
 "#,
     );
     for (k, cmd) in commands::DEFAULT_KEYS {
-        s += &format!("# {:<12} = \"{}\"\n", format!("\"{k}\""), commands::id_of(*cmd));
+        s += &format!(
+            "# {:<12} = \"{}\"\n",
+            format!("\"{k}\""),
+            commands::id_of(*cmd)
+        );
     }
     s += "#\n# All command ids:\n";
     for c in commands::all() {
@@ -233,7 +289,17 @@ mod tests {
         assert_eq!(cfg.output.keep_alive, "tone");
         assert!(cfg.keys.is_empty());
         // uncommenting every default binding must still parse and validate
-        let active: String = text.lines().map(|l| if l.starts_with("# \"") { l[2..].to_string() } else { l.to_string() }).collect::<Vec<_>>().join("\n");
+        let active: String = text
+            .lines()
+            .map(|l| {
+                if l.starts_with("# \"") {
+                    l[2..].to_string()
+                } else {
+                    l.to_string()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
         let cfg: Config = toml::from_str(&active).unwrap();
         assert!(!cfg.keys.is_empty());
         assert!(validate(&cfg).is_empty(), "{:?}", validate(&cfg));
@@ -259,13 +325,23 @@ speed = 90
         let map = keymap(&cfg);
         assert!(!map.contains_key(&commands::parse_key("q").unwrap()));
         assert_eq!(map[&commands::parse_key("ctrl+q").unwrap()], Cmd::Quit);
-        assert_eq!(map[&commands::parse_key("F").unwrap()], Cmd::Fx(crate::fx::FxKind::Reverb));
+        assert_eq!(
+            map[&commands::parse_key("F").unwrap()],
+            Cmd::Fx(crate::fx::FxKind::Reverb)
+        );
         assert_eq!(map[&commands::parse_key("ctrl+s").unwrap()], Cmd::Save);
-        let bad: Config = toml::from_str("[keys]\n\"ctrl+\" = \"nope\"\n[output]\nkeep_alive = \"loud\"").unwrap();
+        let bad: Config =
+            toml::from_str("[keys]\n\"ctrl+\" = \"nope\"\n[output]\nkeep_alive = \"loud\"")
+                .unwrap();
         assert_eq!(validate(&bad).len(), 3);
         assert!(toml::from_str::<Config>("[editor]\nbogus = 1").is_err());
-        let e = toml::from_str::<Config>("[editor]\nbogus = 1").unwrap_err().to_string();
+        let e = toml::from_str::<Config>("[editor]\nbogus = 1")
+            .unwrap_err()
+            .to_string();
         let short = short_toml_error(&e);
-        assert!(short.starts_with("line 2: unknown field `bogus`"), "{short}");
+        assert!(
+            short.starts_with("line 2: unknown field `bogus`"),
+            "{short}"
+        );
     }
 }

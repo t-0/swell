@@ -2,12 +2,12 @@
 
 use crate::app::{App, Mode, SPEED_MAX, SPEED_MIN};
 use crate::audio::fmt_time;
+use ratatui::Frame;
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Clear, Paragraph, Widget, Wrap};
-use ratatui::Frame;
 
 const WAVE_FG: Color = Color::Rgb(90, 200, 130);
 const WAVE_DIM: Color = Color::Rgb(60, 70, 65);
@@ -72,9 +72,13 @@ pub fn draw(f: &mut Frame, app: &mut App) {
 
 fn draw_palette(app: &App, p: &crate::app::Palette, area: Rect, buf: &mut Buffer) {
     // current bindings per command, from the (possibly user-modified) keymap
-    let mut bound: std::collections::HashMap<crate::commands::Cmd, Vec<String>> = std::collections::HashMap::new();
+    let mut bound: std::collections::HashMap<crate::commands::Cmd, Vec<String>> =
+        std::collections::HashMap::new();
     for (chord, cmd) in &app.keymap {
-        bound.entry(*cmd).or_default().push(crate::commands::format_key(chord));
+        bound
+            .entry(*cmd)
+            .or_default()
+            .push(crate::commands::format_key(chord));
     }
     for v in bound.values_mut() {
         v.sort_by_key(|k| (k.len(), k.clone()));
@@ -82,7 +86,12 @@ fn draw_palette(app: &App, p: &crate::app::Palette, area: Rect, buf: &mut Buffer
     let w = 84.min(area.width.saturating_sub(2)).max(20);
     let rows = p.matches.len().clamp(1, 18) as u16;
     let h = (rows + 4).min(area.height);
-    let r = Rect::new(area.x + (area.width - w) / 2, area.y + 1.min(area.height.saturating_sub(h)), w, h);
+    let r = Rect::new(
+        area.x + (area.width - w) / 2,
+        area.y + 1.min(area.height.saturating_sub(h)),
+        w,
+        h,
+    );
     Clear.render(r, buf);
     let block = Block::bordered()
         .title(" command palette  (type to filter · ↑↓ · Enter · Esc) ")
@@ -90,7 +99,12 @@ fn draw_palette(app: &App, p: &crate::app::Palette, area: Rect, buf: &mut Buffer
     let inner = block.inner(r);
     block.render(r, buf);
     let line = Line::from(vec![
-        Span::styled("> ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "> ",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::raw(p.input.clone()),
         Span::styled("█", Style::default().fg(Color::Cyan)),
     ]);
@@ -100,18 +114,26 @@ fn draw_palette(app: &App, p: &crate::app::Palette, area: Rect, buf: &mut Buffer
         return;
     }
     if p.matches.is_empty() {
-        Paragraph::new(Span::styled("  no matching commands", Style::default().fg(Color::DarkGray)))
-            .render(Rect::new(inner.x, inner.y + 2, inner.width, 1), buf);
+        Paragraph::new(Span::styled(
+            "  no matching commands",
+            Style::default().fg(Color::DarkGray),
+        ))
+        .render(Rect::new(inner.x, inner.y + 2, inner.width, 1), buf);
         return;
     }
-    let first = p.selected.saturating_sub(list_h.saturating_sub(1)).min(p.matches.len().saturating_sub(list_h));
+    let first = p
+        .selected
+        .saturating_sub(list_h.saturating_sub(1))
+        .min(p.matches.len().saturating_sub(list_h));
     let cmds = crate::commands::all();
     for (row, &ci) in p.matches.iter().enumerate().skip(first).take(list_h) {
         let c = &cmds[ci];
         let y = inner.y + 2 + (row - first) as u16;
         let selected = row == p.selected;
         let base = if selected {
-            Style::default().bg(Color::Rgb(60, 80, 140)).fg(Color::White)
+            Style::default()
+                .bg(Color::Rgb(60, 80, 140))
+                .fg(Color::White)
         } else {
             Style::default().fg(Color::White)
         };
@@ -121,8 +143,22 @@ fn draw_palette(app: &App, p: &crate::app::Palette, area: Rect, buf: &mut Buffer
         let cat = format!("{:<11}", c.category);
         let line = Line::from(vec![
             Span::styled(marker, base.fg(Color::Cyan)),
-            Span::styled(cat, base.fg(if is_fx { Color::Rgb(255, 170, 60) } else { Color::DarkGray })),
-            Span::styled(c.name, base.add_modifier(if selected { Modifier::BOLD } else { Modifier::empty() })),
+            Span::styled(
+                cat,
+                base.fg(if is_fx {
+                    Color::Rgb(255, 170, 60)
+                } else {
+                    Color::DarkGray
+                }),
+            ),
+            Span::styled(
+                c.name,
+                base.add_modifier(if selected {
+                    Modifier::BOLD
+                } else {
+                    Modifier::empty()
+                }),
+            ),
         ]);
         Paragraph::new(line).render(Rect::new(inner.x, y, inner.width, 1), buf);
         if let Some(keys) = bound.get(&c.cmd) {
@@ -137,8 +173,16 @@ fn draw_palette(app: &App, p: &crate::app::Palette, area: Rect, buf: &mut Buffer
     let count = format!(" {}/{} ", p.matches.len(), cmds.len());
     let cw = count.len() as u16;
     if cw < r.width {
-        Paragraph::new(Span::styled(count, Style::default().fg(Color::DarkGray).bg(Color::Rgb(25, 25, 35))))
-            .render(Rect::new(r.x + r.width - cw - 1, r.y + r.height - 1, cw, 1), buf);
+        Paragraph::new(Span::styled(
+            count,
+            Style::default()
+                .fg(Color::DarkGray)
+                .bg(Color::Rgb(25, 25, 35)),
+        ))
+        .render(
+            Rect::new(r.x + r.width - cw - 1, r.y + r.height - 1, cw, 1),
+            buf,
+        );
     }
 }
 
@@ -168,8 +212,14 @@ fn draw_title(app: &App, area: Rect, buf: &mut Buffer) {
     let room = (area.width as usize).saturating_sub(fixed);
     let name = left_truncate(&name, room);
     let line = Line::from(vec![
-        Span::styled(" swell ", style.add_modifier(Modifier::BOLD).fg(Color::Cyan)),
-        Span::styled(transport, style.fg(Color::Green).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            " swell ",
+            style.add_modifier(Modifier::BOLD).fg(Color::Cyan),
+        ),
+        Span::styled(
+            transport,
+            style.fg(Color::Green).add_modifier(Modifier::BOLD),
+        ),
         Span::styled(name, style),
         Span::styled(dirty, style.fg(Color::Yellow)),
     ]);
@@ -205,10 +255,14 @@ fn draw_markers(app: &App, area: Rect, buf: &mut Buffer) {
                     .set_fg(Color::Magenta);
             }
             if let Some(c) = app.frame_to_col(ls) {
-                buf[(area.x + c as u16, area.y)].set_char('◆').set_fg(Color::Magenta);
+                buf[(area.x + c as u16, area.y)]
+                    .set_char('◆')
+                    .set_fg(Color::Magenta);
             }
             if let Some(c) = app.frame_to_col(le) {
-                buf[(area.x + c as u16, area.y)].set_char('◆').set_fg(Color::Magenta);
+                buf[(area.x + c as u16, area.y)]
+                    .set_char('◆')
+                    .set_fg(Color::Magenta);
             }
         }
     }
@@ -228,9 +282,11 @@ fn draw_markers(app: &App, area: Rect, buf: &mut Buffer) {
     }
     if let Some(p) = app.playhead() {
         if let Some(c) = app.frame_to_col(p) {
-            buf[(area.x + c as u16, area.y)]
-                .set_char('▶')
-                .set_style(Style::default().fg(PLAYHEAD_FG).add_modifier(Modifier::BOLD));
+            buf[(area.x + c as u16, area.y)].set_char('▶').set_style(
+                Style::default()
+                    .fg(PLAYHEAD_FG)
+                    .add_modifier(Modifier::BOLD),
+            );
         }
     }
     if let Some(c) = app.frame_to_col(app.cursor) {
@@ -246,9 +302,12 @@ fn draw_bars(app: &App, area: Rect, buf: &mut Buffer) {
         if !app.audio.is_empty() {
             let hint = match app.bar_start {
                 Some(_) => " bar start marked — B at the bar end sets the tempo, or A analyses",
-                None => " no beat grid — b/B mark a bar at the cursor, g marks the selection, A analyses",
+                None => {
+                    " no beat grid — b/B mark a bar at the cursor, g marks the selection, A analyses"
+                }
             };
-            Paragraph::new(Span::styled(hint, Style::default().fg(Color::DarkGray))).render(area, buf);
+            Paragraph::new(Span::styled(hint, Style::default().fg(Color::DarkGray)))
+                .render(area, buf);
         }
         return;
     };
@@ -263,26 +322,34 @@ fn draw_bars(app: &App, area: Rect, buf: &mut Buffer) {
                 continue;
             }
             if let Some(c) = app.frame_to_col(f.round() as usize) {
-                buf[(area.x + c as u16, area.y)].set_char('·').set_fg(BEAT_FG);
+                buf[(area.x + c as u16, area.y)]
+                    .set_char('·')
+                    .set_fg(BEAT_FG);
             }
         }
     }
     let mut next_free = 0usize;
     for (k, f) in g.bars_in(vs, ve, rate, every) {
-        let Some(c) = app.frame_to_col(f.round() as usize) else { continue };
+        let Some(c) = app.frame_to_col(f.round() as usize) else {
+            continue;
+        };
         let is_anchor = k == 0;
         let style = if is_anchor {
             Style::default().fg(ANCHOR_FG).add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(BAR_FG)
         };
-        buf[(area.x + c as u16, area.y)].set_char(if is_anchor { '◆' } else { '┃' }).set_style(style);
+        buf[(area.x + c as u16, area.y)]
+            .set_char(if is_anchor { '◆' } else { '┃' })
+            .set_style(style);
         let label = g.bar_number(k, rate).to_string();
         if c >= next_free || c == 0 {
             for (i, ch) in label.chars().enumerate() {
                 let x = c + 1 + i;
                 if x < w {
-                    buf[(area.x + x as u16, area.y)].set_char(ch).set_style(style);
+                    buf[(area.x + x as u16, area.y)]
+                        .set_char(ch)
+                        .set_style(style);
                 }
             }
             next_free = c + label.len() + 2;
@@ -291,18 +358,26 @@ fn draw_bars(app: &App, area: Rect, buf: &mut Buffer) {
     // right-aligned readout: tempo, meter, cursor position in bars.beats, snap state
     let idx = g.beat_index(app.cursor as f64, rate);
     let k = idx.floor() as i64;
-    let pos = format!("{}.{}", g.bar_number(k, rate), k.rem_euclid(g.beats_per_bar as i64) + 1);
+    let pos = format!(
+        "{}.{}",
+        g.bar_number(k, rate),
+        k.rem_euclid(g.beats_per_bar as i64) + 1
+    );
     let readout = format!(" {:.2} BPM {}/4 @{} ", g.bpm, g.beats_per_bar, pos);
     let tag = if app.snap { " snap " } else { "" };
     let total = (readout.chars().count() + tag.chars().count()) as u16;
     if total < area.width {
         let mut x = area.x + area.width - total;
         for ch in readout.chars() {
-            buf[(x, area.y)].set_char(ch).set_style(Style::default().fg(BAR_FG).bg(TITLE_BG));
+            buf[(x, area.y)]
+                .set_char(ch)
+                .set_style(Style::default().fg(BAR_FG).bg(TITLE_BG));
             x += 1;
         }
         for ch in tag.chars() {
-            buf[(x, area.y)].set_char(ch).set_style(Style::default().fg(Color::Black).bg(ANCHOR_FG));
+            buf[(x, area.y)]
+                .set_char(ch)
+                .set_style(Style::default().fg(Color::Black).bg(ANCHOR_FG));
             x += 1;
         }
     }
@@ -316,7 +391,9 @@ fn draw_wave(app: &mut App, area: Rect, buf: &mut Buffer) {
         let msg = "no audio — press o to open a .wav / .mp3, ? for help";
         let x = area.x + area.width.saturating_sub(msg.len() as u16) / 2;
         let y = area.y + area.height / 2;
-        Paragraph::new(msg).style(Style::default().fg(Color::DarkGray)).render(Rect::new(x, y, msg.len() as u16, 1), buf);
+        Paragraph::new(msg)
+            .style(Style::default().fg(Color::DarkGray))
+            .render(Rect::new(x, y, msg.len() as u16, 1), buf);
         return;
     }
     let w = app.width();
@@ -325,18 +402,29 @@ fn draw_wave(app: &mut App, area: Rect, buf: &mut Buffer) {
     let loop_range = app.loop_range;
     let cursor_col = app.frame_to_col(app.cursor);
     let play_col = app.playhead().and_then(|p| app.frame_to_col(p));
-    let slice_cols: Vec<usize> = app.slices.iter().filter_map(|&s| app.frame_to_col(s)).collect();
+    let slice_cols: Vec<usize> = app
+        .slices
+        .iter()
+        .filter_map(|&s| app.frame_to_col(s))
+        .collect();
     let bar_cols: Vec<usize> = match app.grid {
         Some(g) => {
             let (_, every) = grid_density(app);
-            g.bars_in(app.view_start, app.col_to_frame(w), app.audio.sample_rate, every)
-                .into_iter()
-                .filter_map(|(_, f)| app.frame_to_col(f.round() as usize))
-                .collect()
+            g.bars_in(
+                app.view_start,
+                app.col_to_frame(w),
+                app.audio.sample_rate,
+                every,
+            )
+            .into_iter()
+            .filter_map(|(_, f)| app.frame_to_col(f.round() as usize))
+            .collect()
         }
         None => Vec::new(),
     };
     let col_starts: Vec<usize> = (0..=w).map(|c| app.col_to_frame(c)).collect();
+    let style_kind = app.render;
+    let (gw, gh) = style_kind.grid();
     let cols = app.wave_columns().clone();
 
     let lane_h = (area.height as usize / nch).max(1);
@@ -350,9 +438,24 @@ fn draw_wave(app: &mut App, area: Rect, buf: &mut Buffer) {
         } else {
             lane_h
         };
-        let half_rows = (h * 2) as f32;
+        let px_rows = (h * gh) as f32;
+        // lit pixel-row span [top, bot] of each pixel column, None past the end
+        let spans: Vec<Option<(usize, usize)>> = cols[ch]
+            .iter()
+            .map(|&(mn, mx)| {
+                if mn.is_nan() {
+                    return None;
+                }
+                let row = |v: f32| {
+                    (((1.0 - v) / 2.0) * px_rows)
+                        .floor()
+                        .clamp(0.0, px_rows - 1.0) as usize
+                };
+                let (a, b) = (row(mx), row(mn));
+                Some((a.min(b), a.max(b)))
+            })
+            .collect();
         for c in 0..w {
-            let (mn, mx) = cols[ch][c];
             let fs = col_starts[c];
             let fe = col_starts[c + 1].max(fs + 1);
             let in_sel = selection.is_some_and(|(s, e)| fe > s && fs < e);
@@ -375,21 +478,25 @@ fn draw_wave(app: &mut App, area: Rect, buf: &mut Buffer) {
                 WAVE_FG
             };
             let x = area.x + c as u16;
-            let valid = !mn.is_nan();
-            // half-row indices covered by [mn, mx]
-            let top = if valid { (((1.0 - mx) / 2.0) * half_rows).floor().clamp(0.0, half_rows - 1.0) as usize } else { 0 };
-            let bot = if valid { (((1.0 - mn) / 2.0) * half_rows).floor().clamp(0.0, half_rows - 1.0) as usize } else { 0 };
-            let (top, bot) = (top.min(bot), top.max(bot));
+            let px = &spans[c * gw..(c + 1) * gw];
+            let valid = px[0].is_some();
             for r in 0..h {
-                let up = valid && (2 * r) >= top && (2 * r) <= bot;
-                let lo = valid && (2 * r + 1) >= top && (2 * r + 1) <= bot;
+                let mut mask = 0usize;
+                for (sx, span) in px.iter().enumerate() {
+                    let Some((top, bot)) = *span else { continue };
+                    for sy in 0..gh {
+                        let py = r * gh + sy;
+                        if py >= top && py <= bot {
+                            mask |= 1 << (sy * gw + sx);
+                        }
+                    }
+                }
+                let lit = mask != 0;
                 let y = (y0 + r) as u16;
                 let cell = &mut buf[(x, y)];
-                let ch_sym = match (up, lo) {
-                    (true, true) => '█',
-                    (true, false) => '▀',
-                    (false, true) => '▄',
-                    (false, false) => {
+                let ch_sym = match lit {
+                    true => style_kind.glyph(mask),
+                    false => {
                         if is_cursor || is_play {
                             '│'
                         } else if is_slice {
@@ -407,7 +514,7 @@ fn draw_wave(app: &mut App, area: Rect, buf: &mut Buffer) {
                 if let Some(b) = bg {
                     style = style.bg(b);
                 }
-                let fgc = if up || lo {
+                let fgc = if lit {
                     fg
                 } else if is_cursor {
                     CURSOR_FG
@@ -426,7 +533,9 @@ fn draw_wave(app: &mut App, area: Rect, buf: &mut Buffer) {
         // channel label in the lane's top-left corner
         let label = format!("{}", ch + 1);
         if h >= 2 {
-            buf[(area.x, y0 as u16)].set_char(label.chars().next().unwrap()).set_fg(Color::DarkGray);
+            buf[(area.x, y0 as u16)]
+                .set_char(label.chars().next().unwrap())
+                .set_fg(Color::DarkGray);
         }
     }
 }
@@ -441,8 +550,15 @@ fn draw_timeline(app: &App, area: Rect, buf: &mut Buffer) {
     }
     let rate = app.audio.sample_rate as f64;
     let spc = app.fpc / rate; // seconds per column
-    const STEPS: [f64; 18] = [0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1.0, 2.0, 5.0, 10.0, 15.0, 30.0, 60.0, 120.0, 300.0];
-    let step = STEPS.iter().copied().find(|s| s / spc >= 14.0).unwrap_or(600.0);
+    const STEPS: [f64; 18] = [
+        0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1.0, 2.0, 5.0, 10.0, 15.0, 30.0,
+        60.0, 120.0, 300.0,
+    ];
+    let step = STEPS
+        .iter()
+        .copied()
+        .find(|s| s / spc >= 14.0)
+        .unwrap_or(600.0);
     let t0 = app.view_start as f64 / rate;
     let t1 = t0 + app.width() as f64 * spc;
     let mut t = (t0 / step).ceil() * step;
@@ -464,7 +580,9 @@ fn draw_timeline(app: &App, area: Rect, buf: &mut Buffer) {
         let room = (step / spc) as usize;
         if label.len() + 1 < room && col + label.len() + 1 < w {
             for (i, ch) in label.chars().enumerate() {
-                buf[(x + 1 + i as u16, area.y)].set_char(ch).set_fg(Color::Gray);
+                buf[(x + 1 + i as u16, area.y)]
+                    .set_char(ch)
+                    .set_fg(Color::Gray);
             }
         }
         t += step;
@@ -473,7 +591,9 @@ fn draw_timeline(app: &App, area: Rect, buf: &mut Buffer) {
     if (z.len() as u16) < area.width {
         let x0 = area.x + area.width - z.len() as u16;
         for (i, ch) in z.chars().enumerate() {
-            buf[(x0 + i as u16, area.y)].set_char(ch).set_fg(Color::DarkGray);
+            buf[(x0 + i as u16, area.y)]
+                .set_char(ch)
+                .set_fg(Color::DarkGray);
         }
     }
 }
@@ -485,7 +605,11 @@ fn draw_speed(app: &mut App, area: Rect, buf: &mut Buffer) {
     let right = format!(" {SPEED_MAX}%");
     let hint = "   -/= ±1%  _/+ ±10%  1 reset  (pitch follows speed)";
     let fixed = (label.len() + left.len() + right.len()) as u16;
-    let hint_w = if area.width > fixed + 60 { hint.chars().count() as u16 } else { 0 };
+    let hint_w = if area.width > fixed + 60 {
+        hint.chars().count() as u16
+    } else {
+        0
+    };
     let track_w = area.width.saturating_sub(fixed + hint_w).clamp(0, 61);
     let mut x = area.x;
     let put = |buf: &mut Buffer, x: &mut u16, text: &str, style: Style| {
@@ -496,15 +620,26 @@ fn draw_speed(app: &mut App, area: Rect, buf: &mut Buffer) {
             }
         }
     };
-    let accent = if app.speed == 100 { Color::Gray } else { Color::Yellow };
-    put(buf, &mut x, &label, Style::default().fg(accent).add_modifier(Modifier::BOLD));
+    let accent = if app.speed == 100 {
+        Color::Gray
+    } else {
+        Color::Yellow
+    };
+    put(
+        buf,
+        &mut x,
+        &label,
+        Style::default().fg(accent).add_modifier(Modifier::BOLD),
+    );
     put(buf, &mut x, &left, Style::default().fg(Color::DarkGray));
     let track = Rect::new(x, area.y, track_w, 1);
     app.slider_area = track;
     if track_w >= 2 {
         let frac = (app.speed - SPEED_MIN) as f64 / (SPEED_MAX - SPEED_MIN) as f64;
         let knob = (frac * (track_w - 1) as f64).round() as u16;
-        let mid = (((100 - SPEED_MIN) as f64 / (SPEED_MAX - SPEED_MIN) as f64) * (track_w - 1) as f64).round() as u16;
+        let mid = (((100 - SPEED_MIN) as f64 / (SPEED_MAX - SPEED_MIN) as f64)
+            * (track_w - 1) as f64)
+            .round() as u16;
         for i in 0..track_w {
             let (ch, color) = if i == knob {
                 ('●', accent)
@@ -535,12 +670,23 @@ fn draw_status(app: &App, area: Rect, buf: &mut Buffer) {
             format!(" {}Hz {}ch {}bit ", rate, a.n_channels(), app.bits),
             style,
         ),
-        Span::styled(format!("│ len {} ", fmt_time(a.frames(), rate)), style.fg(Color::White)),
-        Span::styled(format!("│ cur {} ", fmt_time(app.cursor, rate)), style.fg(Color::White)),
+        Span::styled(
+            format!("│ len {} ", fmt_time(a.frames(), rate)),
+            style.fg(Color::White),
+        ),
+        Span::styled(
+            format!("│ cur {} ", fmt_time(app.cursor, rate)),
+            style.fg(Color::White),
+        ),
     ];
     if let Some((s, e)) = app.selection {
         spans.push(Span::styled(
-            format!("│ sel {}–{} ({}) ", fmt_time(s, rate), fmt_time(e, rate), fmt_time(e - s, rate)),
+            format!(
+                "│ sel {}–{} ({}) ",
+                fmt_time(s, rate),
+                fmt_time(e, rate),
+                fmt_time(e - s, rate)
+            ),
             style.fg(Color::LightBlue),
         ));
     }
@@ -552,14 +698,23 @@ fn draw_status(app: &App, area: Rect, buf: &mut Buffer) {
     }
     if !app.slices.is_empty() {
         spans.push(Span::styled(
-            format!("│ {} slices/{} pieces ", app.slices.len(), app.slices.len() + 1),
+            format!(
+                "│ {} slices/{} pieces ",
+                app.slices.len(),
+                app.slices.len() + 1
+            ),
             style.fg(SLICE_FG),
         ));
     }
     if let Some(p) = app.playhead() {
-        spans.push(Span::styled(format!("│ ▶ {} ", fmt_time(p, rate)), style.fg(PLAYHEAD_FG)));
+        spans.push(Span::styled(
+            format!("│ ▶ {} ", fmt_time(p, rate)),
+            style.fg(PLAYHEAD_FG),
+        ));
     }
-    Paragraph::new(Line::from(spans)).style(style).render(area, buf);
+    Paragraph::new(Line::from(spans))
+        .style(style)
+        .render(area, buf);
 }
 
 fn zoom_label(fpc: f64, rate: u32) -> String {
@@ -580,10 +735,18 @@ fn draw_message(app: &App, area: Rect, buf: &mut Buffer) {
     match &app.mode {
         Mode::Prompt(p) => {
             let line = Line::from(vec![
-                Span::styled(format!(" {}: ", p.label), Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    format!(" {}: ", p.label),
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                ),
                 Span::raw(p.input.clone()),
                 Span::styled("█", Style::default().fg(Color::Cyan)),
-                Span::styled("   (Enter confirm · Esc cancel)", Style::default().fg(Color::DarkGray)),
+                Span::styled(
+                    "   (Enter confirm · Esc cancel)",
+                    Style::default().fg(Color::DarkGray),
+                ),
             ]);
             Paragraph::new(line).render(area, buf);
         }
@@ -594,7 +757,8 @@ fn draw_message(app: &App, area: Rect, buf: &mut Buffer) {
                 } else {
                     Style::default().fg(Color::LightGreen)
                 };
-                Paragraph::new(Line::from(Span::styled(format!(" {}", m.text), style))).render(area, buf);
+                Paragraph::new(Line::from(Span::styled(format!(" {}", m.text), style)))
+                    .render(area, buf);
             }
         }
     }
@@ -627,16 +791,26 @@ fn draw_keys(area: Rect, buf: &mut Buffer) {
     ];
     let mut spans = vec![Span::styled(" ", style)];
     for (k, d) in keys {
-        spans.push(Span::styled(k, style.fg(Color::Cyan).add_modifier(Modifier::BOLD)));
+        spans.push(Span::styled(
+            k,
+            style.fg(Color::Cyan).add_modifier(Modifier::BOLD),
+        ));
         spans.push(Span::styled(format!(" {d}  "), style));
     }
-    Paragraph::new(Line::from(spans)).style(style).render(area, buf);
+    Paragraph::new(Line::from(spans))
+        .style(style)
+        .render(area, buf);
 }
 
 fn centered(area: Rect, w: u16, h: u16) -> Rect {
     let w = w.min(area.width);
     let h = h.min(area.height);
-    Rect::new(area.x + (area.width - w) / 2, area.y + (area.height - h) / 2, w, h)
+    Rect::new(
+        area.x + (area.width - w) / 2,
+        area.y + (area.height - h) / 2,
+        w,
+        h,
+    )
 }
 
 fn draw_confirm(question: &str, area: Rect, buf: &mut Buffer) {
@@ -651,7 +825,10 @@ fn draw_confirm(question: &str, area: Rect, buf: &mut Buffer) {
     Paragraph::new(vec![
         Line::from(question.to_string()),
         Line::from(""),
-        Line::from(Span::styled("y = yes   n / Esc = no", Style::default().fg(Color::Gray))),
+        Line::from(Span::styled(
+            "y = yes   n / Esc = no",
+            Style::default().fg(Color::Gray),
+        )),
     ])
     .wrap(Wrap { trim: true })
     .render(inner, buf);
@@ -660,53 +837,120 @@ fn draw_confirm(question: &str, area: Rect, buf: &mut Buffer) {
 fn draw_help(area: Rect, buf: &mut Buffer) {
     const HELP: &[(&str, &str)] = &[
         ("COMMAND PALETTE", ""),
-        (":  /  Ctrl+P", "open the palette: fuzzy-search every command and all 45 effects"),
+        (
+            ":  /  Ctrl+P",
+            "open the palette: fuzzy-search every command and all 45 effects",
+        ),
         ("FILES", ""),
         ("o", "open a .wav / .mp3 / .flac / .aiff / .m4a file"),
         ("w  /  Ctrl+S", "save (same file; format by extension)"),
         ("W", "save as (.wav or .mp3)"),
         ("E", "export selection to a new file"),
-        ("e", "export pieces between slice points, {n} = piece number"),
+        (
+            "e",
+            "export pieces between slice points, {n} = piece number",
+        ),
         ("q  /  Ctrl+C", "quit"),
         ("TRANSPORT", ""),
-        ("Space", "play / pause: selection (looped if it is the loop), else loop, else from cursor"),
+        (
+            "Space",
+            "play / pause: selection (looped if it is the loop), else loop, else from cursor",
+        ),
         ("Enter", "stop"),
         ("p", "move cursor to playhead"),
-        ("- / =", "playback speed ±1%  (_ / +: ±10%),  1 = back to 100%"),
-        ("mouse on slider", "click / drag / wheel to set speed (50–200%, pitch follows)"),
+        (
+            "- / =",
+            "playback speed ±1%  (_ / +: ±10%),  1 = back to 100%",
+        ),
+        (
+            "mouse on slider",
+            "click / drag / wheel to set speed (50–200%, pitch follows)",
+        ),
         ("NAVIGATE & SELECT", ""),
         ("← →", "move cursor one column   (Ctrl/Alt: ×10)"),
         ("Shift+← →", "extend selection"),
-        ("Home / End", "start / end of file   (Shift: extend selection)"),
+        (
+            "Home / End",
+            "start / end of file   (Shift: extend selection)",
+        ),
         ("[  /  ]", "set selection start / end at cursor"),
         ("a", "select all"),
         ("Esc", "stop playback, else clear selection"),
         ("mouse", "click = cursor, drag = select, wheel = zoom"),
-        ("↑ / ↓  /  0  /  z", "zoom in / out  /  fit  /  zoom to selection"),
+        (
+            "↑ / ↓  /  0  /  z",
+            "zoom in / out  /  fit  /  zoom to selection",
+        ),
         ("PgUp / PgDn  , .", "scroll"),
+        (
+            "R",
+            "waveform rendering: blocks / quads / sextants / braille / ascii",
+        ),
         ("LOOP & SLICES", ""),
-        ("l  /  L", "loop = selection (toggle; applies while playing)  /  clear loop"),
-        ("m  /  M", "add or remove slice point at cursor  /  clear all"),
+        (
+            "l  /  L",
+            "loop = selection (toggle; applies while playing)  /  clear loop",
+        ),
+        (
+            "m  /  M",
+            "add or remove slice point at cursor  /  clear all",
+        ),
         ("Tab / Shift+Tab", "jump to next / previous slice point"),
-        ("BEAT GRID  (saved as ACID tempo + bar cue markers in WAV)", ""),
-        ("b  /  B", "mark bar start / bar end at the cursor; a full bar sets the tempo"),
+        (
+            "BEAT GRID  (saved as ACID tempo + bar cue markers in WAV)",
+            "",
+        ),
+        (
+            "b  /  B",
+            "mark bar start / bar end at the cursor; a full bar sets the tempo",
+        ),
         ("g", "mark bar = selection or loop"),
-        ("A", "beat analysis: tracks beats, seeded by the marked bar (tempo prior + downbeat)"),
-        ("( )  /  { }", "BPM ∓0.1  /  shift grid 1 ms earlier / later"),
-        ("s", "snap: ← → step beats, Ctrl ← → bars, Shift extends, clicks snap"),
-        ("C", "conform: pad/trim lead-in to N whole bars, pad end to a whole bar"),
-        ("palette", "set BPM, beats per bar, double/halve, select N bars, slice at bars,"),
+        (
+            "A",
+            "beat analysis: tracks beats, seeded by the marked bar (tempo prior + downbeat)",
+        ),
+        (
+            "( )  /  { }",
+            "BPM ∓0.1  /  shift grid 1 ms earlier / later",
+        ),
+        (
+            "s",
+            "snap: ← → step beats, Ctrl ← → bars, Shift extends, clicks snap",
+        ),
+        (
+            "C",
+            "conform: pad/trim lead-in to N whole bars, pad end to a whole bar",
+        ),
+        (
+            "palette",
+            "set BPM, beats per bar, double/halve, select N bars, slice at bars,",
+        ),
         ("", "export markers as Audacity labels, clear grid"),
         ("EDIT", ""),
         ("x  c  v", "cut / copy / paste (paste replaces selection)"),
         ("Del / Backspace", "delete selection"),
         ("t", "trim to selection"),
         ("u  /  U", "undo / redo  (also Ctrl+Z / Ctrl+Y)"),
-        ("EFFECTS  (apply to selection, or whole file if nothing selected)", ""),
-        ("f  /  F  /  n  /  r", "fade in / fade out / normalize / reverse with defaults"),
-        ("via palette", "gain, compressor, limiter, gate, filters & EQ, delay, reverb,"),
-        ("", "chorus, flanger, phaser, vibrato, ring mod, bit crush, overdrive,"),
-        ("", "time stretch, pitch shift, speed, repeat, silence, stereo tools, generators"),
+        (
+            "EFFECTS  (apply to selection, or whole file if nothing selected)",
+            "",
+        ),
+        (
+            "f  /  F  /  n  /  r",
+            "fade in / fade out / normalize / reverse with defaults",
+        ),
+        (
+            "via palette",
+            "gain, compressor, limiter, gate, filters & EQ, delay, reverb,",
+        ),
+        (
+            "",
+            "chorus, flanger, phaser, vibrato, ring mod, bit crush, overdrive,",
+        ),
+        (
+            "",
+            "time stretch, pitch shift, speed, repeat, silence, stereo tools, generators",
+        ),
     ];
     let h = (HELP.len() as u16 + 4).min(area.height);
     let r = centered(area, 78, h);
@@ -720,7 +964,12 @@ fn draw_help(area: Rect, buf: &mut Buffer) {
         .iter()
         .map(|(k, d)| {
             if d.is_empty() && !k.is_empty() {
-                Line::from(Span::styled(*k, Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)))
+                Line::from(Span::styled(
+                    *k,
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                ))
             } else {
                 Line::from(vec![
                     Span::styled(format!("  {k:<18}"), Style::default().fg(Color::Cyan)),

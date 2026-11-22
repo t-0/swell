@@ -5,7 +5,7 @@
 //! → least-squares constant-tempo fit → downbeat phase from low-band energy.
 
 use crate::audio::Audio;
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use std::f32::consts::PI;
 
 /// A constant-tempo grid: beat `k` is at `anchor + k * frames_per_beat`,
@@ -60,7 +60,11 @@ impl Grid {
         let unit = if bars { self.beats_per_bar as i64 } else { 1 };
         let idx = self.beat_index(frame as f64, rate) / unit as f64;
         let eps = 1e-4;
-        let base = if steps > 0 { (idx + eps).floor() } else { (idx - eps).ceil() } as i64;
+        let base = if steps > 0 {
+            (idx + eps).floor()
+        } else {
+            (idx - eps).ceil()
+        } as i64;
         let k = (base + steps) * unit;
         (self.beat_frame(k, rate).round().max(0.0) as usize).min(n)
     }
@@ -73,7 +77,9 @@ impl Grid {
         }
         let k0 = self.beat_index(start as f64, rate).ceil() as i64;
         let k1 = self.beat_index(end as f64, rate).ceil() as i64;
-        (k0..k1).map(|k| (k, self.anchor as f64 + k as f64 * fpb)).collect()
+        (k0..k1)
+            .map(|k| (k, self.anchor as f64 + k as f64 * fpb))
+            .collect()
     }
 
     /// Downbeats in `[start, end)`, keeping only every `every`-th bar.
@@ -81,7 +87,9 @@ impl Grid {
         let every = every.max(1);
         self.beats_in(start, end, rate)
             .into_iter()
-            .filter(|(k, _)| self.is_downbeat(*k) && (k / self.beats_per_bar as i64).rem_euclid(every) == 0)
+            .filter(|(k, _)| {
+                self.is_downbeat(*k) && (k / self.beats_per_bar as i64).rem_euclid(every) == 0
+            })
             .collect()
     }
 }
@@ -149,14 +157,18 @@ pub fn detect(a: &Audio, beats_per_bar: u32, hint: Option<BarHint>) -> Result<De
         bail!("need at least 2 seconds of audio");
     }
     let nc = a.n_channels() as f32;
-    let mono: Vec<f32> = (0..n).map(|i| a.channels.iter().map(|c| c[i]).sum::<f32>() / nc).collect();
+    let mono: Vec<f32> = (0..n)
+        .map(|i| a.channels.iter().map(|c| c[i]).sum::<f32>() / nc)
+        .collect();
 
     // ---- onset strength (spectral flux) ----
     let win = ((fs * 0.023).round() as usize).next_power_of_two();
     let hop = win / 2;
     let osr = fs / hop as f64; // onset-function sample rate
     let n_frames = (n - win) / hop + 1;
-    let hann: Vec<f32> = (0..win).map(|i| 0.5 - 0.5 * (2.0 * PI * i as f32 / win as f32).cos()).collect();
+    let hann: Vec<f32> = (0..win)
+        .map(|i| 0.5 - 0.5 * (2.0 * PI * i as f32 / win as f32).cos())
+        .collect();
     // Kick-drum band: below the snare/tom body so downbeats stand out.
     let low_bins = ((120.0 / fs) * win as f64).ceil().max(1.0) as usize;
     let mut re = vec![0f32; win];
@@ -196,7 +208,9 @@ pub fn detect(a: &Audio, beats_per_bar: u32, hint: Option<BarHint>) -> Result<De
         let mean = osf[lo..hi].iter().sum::<f32>() / (hi - lo) as f32;
         detr[t] = (osf[t] - mean).max(0.0);
     }
-    let std = (detr.iter().map(|v| v * v).sum::<f32>() / n_frames as f32).sqrt().max(1e-6);
+    let std = (detr.iter().map(|v| v * v).sum::<f32>() / n_frames as f32)
+        .sqrt()
+        .max(1e-6);
     for v in &mut detr {
         *v /= std;
     }
@@ -206,15 +220,23 @@ pub fn detect(a: &Audio, beats_per_bar: u32, hint: Option<BarHint>) -> Result<De
 
     // ---- tempo via autocorrelation with a prior ----
     // A marked bar (start+end) gives a tempo prior: search only ±8% around it.
-    let hint_bpm: Option<f64> = hint.and_then(|h| h.end.map(|e| (e, h.start))).and_then(|(e, st)| {
-        (e > st).then(|| 60.0 * beats_per_bar.max(1) as f64 * fs / (e - st) as f64)
-    });
+    let hint_bpm: Option<f64> =
+        hint.and_then(|h| h.end.map(|e| (e, h.start)))
+            .and_then(|(e, st)| {
+                (e > st).then(|| 60.0 * beats_per_bar.max(1) as f64 * fs / (e - st) as f64)
+            });
     let (min_lag, max_lag) = match hint_bpm {
         Some(b) => {
             let p0 = osr * 60.0 / b;
-            (((p0 / 1.08).floor() as usize).max(2), ((p0 * 1.08).ceil() as usize).min(n_frames / 2))
+            (
+                ((p0 / 1.08).floor() as usize).max(2),
+                ((p0 * 1.08).ceil() as usize).min(n_frames / 2),
+            )
         }
-        None => ((osr * 60.0 / 220.0).floor().max(2.0) as usize, ((osr * 60.0 / 50.0).ceil() as usize).min(n_frames / 2)),
+        None => (
+            (osr * 60.0 / 220.0).floor().max(2.0) as usize,
+            ((osr * 60.0 / 50.0).ceil() as usize).min(n_frames / 2),
+        ),
     };
     if max_lag <= min_lag + 2 {
         bail!("audio too short for tempo analysis");
@@ -226,7 +248,11 @@ pub fn detect(a: &Audio, beats_per_bar: u32, hint: Option<BarHint>) -> Result<De
             s += detr[t] * detr[t + lag];
         }
         let bpm = 60.0 * osr / lag as f64;
-        let prior = if hint_bpm.is_some() { 1.0 } else { (-0.5 * ((bpm / 110.0).log2() / 0.9).powi(2)).exp() as f32 };
+        let prior = if hint_bpm.is_some() {
+            1.0
+        } else {
+            (-0.5 * ((bpm / 110.0).log2() / 0.9).powi(2)).exp() as f32
+        };
         *v = s / (n_frames - lag) as f32 * prior;
     }
     let mut best = min_lag;
@@ -239,7 +265,11 @@ pub fn detect(a: &Audio, beats_per_bar: u32, hint: Option<BarHint>) -> Result<De
     let period = if best > min_lag && best < max_lag {
         let (y0, y1, y2) = (acf[best - 1], acf[best], acf[best + 1]);
         let denom = y0 - 2.0 * y1 + y2;
-        let d = if denom.abs() > 1e-9 { 0.5 * (y0 - y2) / denom } else { 0.0 };
+        let d = if denom.abs() > 1e-9 {
+            0.5 * (y0 - y2) / denom
+        } else {
+            0.0
+        };
         best as f64 + d.clamp(-0.5, 0.5) as f64
     } else {
         best as f64
@@ -249,7 +279,9 @@ pub fn detect(a: &Audio, beats_per_bar: u32, hint: Option<BarHint>) -> Result<De
     // local score: onset strength smoothed by a Gaussian of width period/32
     let sigma = (period / 32.0).max(1.0);
     let half = (sigma * 3.0).ceil() as usize;
-    let kernel: Vec<f32> = (0..=2 * half).map(|i| (-0.5 * ((i as f64 - half as f64) / sigma).powi(2)).exp() as f32).collect();
+    let kernel: Vec<f32> = (0..=2 * half)
+        .map(|i| (-0.5 * ((i as f64 - half as f64) / sigma).powi(2)).exp() as f32)
+        .collect();
     let ksum: f32 = kernel.iter().sum();
     let mut local = vec![0f32; n_frames];
     for t in 0..n_frames {
@@ -263,7 +295,10 @@ pub fn detect(a: &Audio, beats_per_bar: u32, hint: Option<BarHint>) -> Result<De
         local[t] = s / ksum;
     }
     let alpha = 400f32;
-    let (lo_lag, hi_lag) = ((period / 2.0).round() as usize, (period * 2.0).round() as usize);
+    let (lo_lag, hi_lag) = (
+        (period / 2.0).round() as usize,
+        (period * 2.0).round() as usize,
+    );
     let mut score = vec![0f32; n_frames];
     let mut back = vec![usize::MAX; n_frames];
     for t in 0..n_frames {
@@ -317,7 +352,14 @@ pub fn detect(a: &Audio, beats_per_bar: u32, hint: Option<BarHint>) -> Result<De
     }
     let slope = sxy / sxx; // frames per beat
     let intercept = ym - slope * xm;
-    let fit_ms = beats_t.iter().enumerate().map(|(i, &t)| (frames_of(t) - (intercept + slope * i as f64)).abs()).sum::<f64>() / m / fs * 1000.0;
+    let fit_ms = beats_t
+        .iter()
+        .enumerate()
+        .map(|(i, &t)| (frames_of(t) - (intercept + slope * i as f64)).abs())
+        .sum::<f64>()
+        / m
+        / fs
+        * 1000.0;
     let mut bpm = 60.0 * fs / slope;
     let mut note = String::new();
     if let Some(b0) = hint_bpm {
@@ -336,7 +378,12 @@ pub fn detect(a: &Audio, beats_per_bar: u32, hint: Option<BarHint>) -> Result<De
 
     // ---- downbeat phase: strongest low-band energy + onset on average ----
     // Look a few frames past each beat so the whole attack is seen.
-    let peek = |v: &[f32], t: usize| v[t..(t + 4).min(v.len())].iter().cloned().fold(0f32, f32::max);
+    let peek = |v: &[f32], t: usize| {
+        v[t..(t + 4).min(v.len())]
+            .iter()
+            .cloned()
+            .fold(0f32, f32::max)
+    };
     let low_max = low.iter().cloned().fold(1e-6f32, f32::max);
     let loc_max = local.iter().cloned().fold(1e-6f32, f32::max);
     let bpb = beats_per_bar.max(1) as usize;
@@ -344,7 +391,9 @@ pub fn detect(a: &Audio, beats_per_bar: u32, hint: Option<BarHint>) -> Result<De
     for (i, &t) in beats_t.iter().enumerate() {
         phase_score[i % bpb] += 2.0 * peek(&low, t) / low_max + peek(&local, t) / loc_max;
     }
-    let phase = (0..bpb).max_by(|&a, &b| phase_score[a].partial_cmp(&phase_score[b]).unwrap()).unwrap_or(0);
+    let phase = (0..bpb)
+        .max_by(|&a, &b| phase_score[a].partial_cmp(&phase_score[b]).unwrap())
+        .unwrap_or(0);
     let bar = fpb * bpb as f64;
     let anchor = match hint {
         Some(h) => {
@@ -355,7 +404,11 @@ pub fn detect(a: &Audio, beats_per_bar: u32, hint: Option<BarHint>) -> Result<De
     };
 
     Ok(Detection {
-        grid: Grid { bpm, anchor, beats_per_bar },
+        grid: Grid {
+            bpm,
+            anchor,
+            beats_per_bar,
+        },
         fit_ms,
         n_beats: beats_t.len(),
         note,
@@ -378,7 +431,11 @@ mod tests {
             if pos >= n {
                 break;
             }
-            let (freq, amp, len) = if k % 4 == 0 { (80.0, 0.9, 0.08) } else { (1000.0, 0.5, 0.03) };
+            let (freq, amp, len) = if k % 4 == 0 {
+                (80.0, 0.9, 0.08)
+            } else {
+                (1000.0, 0.5, 0.03)
+            };
             for i in 0..(len * rate as f64) as usize {
                 if pos + i < n {
                     let t = i as f32 / rate as f32;
@@ -395,12 +452,21 @@ mod tests {
         for (bpm, off) in [(120.0, 0.25), (95.0, 0.0), (140.0, 1.1)] {
             let a = clicks(bpm, 20.0, off, 22050);
             let d = detect(&a, 4, None).unwrap();
-            assert!((d.grid.bpm - bpm).abs() < 0.5, "bpm {} vs {}", d.grid.bpm, bpm);
+            assert!(
+                (d.grid.bpm - bpm).abs() < 0.5,
+                "bpm {} vs {}",
+                d.grid.bpm,
+                bpm
+            );
             let bar = d.grid.bar_frames(22050);
             let expect = (off * 22050.0) % bar;
             let diff = (d.grid.anchor as f64 - expect).abs();
             let diff = diff.min(bar - diff);
-            assert!(diff < 22050.0 * 0.03, "anchor off by {:.1} ms at {bpm}", diff / 22.05);
+            assert!(
+                diff < 22050.0 * 0.03,
+                "anchor off by {:.1} ms at {bpm}",
+                diff / 22.05
+            );
             assert!(d.fit_ms < 15.0, "fit {}", d.fit_ms);
         }
     }
@@ -411,12 +477,28 @@ mod tests {
         // user marks a bar 3% too long starting one bar in
         let start = (0.25 * 22050.0) as usize + 4 * 11025;
         let end = start + (4.0 * 11025.0 * 1.03) as usize;
-        let d = detect(&a, 4, Some(BarHint { start, end: Some(end) })).unwrap();
+        let d = detect(
+            &a,
+            4,
+            Some(BarHint {
+                start,
+                end: Some(end),
+            }),
+        )
+        .unwrap();
         assert_eq!(d.grid.anchor, start as i64);
         assert!((d.grid.bpm - 120.0).abs() < 0.5, "bpm {}", d.grid.bpm);
         assert!(d.note.contains("refined"), "{}", d.note);
         // a wildly wrong mark is kept (user authority) but reported
-        let d = detect(&a, 4, Some(BarHint { start, end: Some(start + 11025 * 5) })).unwrap();
+        let d = detect(
+            &a,
+            4,
+            Some(BarHint {
+                start,
+                end: Some(start + 11025 * 5),
+            }),
+        )
+        .unwrap();
         assert!(d.note.contains("kept"), "{}", d.note);
         assert!((d.grid.bpm - 96.0).abs() < 0.5);
         // start-only hint: free tempo, fixed anchor
@@ -427,7 +509,11 @@ mod tests {
 
     #[test]
     fn grid_math() {
-        let g = Grid { bpm: 120.0, anchor: 1000, beats_per_bar: 4 };
+        let g = Grid {
+            bpm: 120.0,
+            anchor: 1000,
+            beats_per_bar: 4,
+        };
         let r = 48000;
         assert_eq!(g.fpb(r), 24000.0);
         assert_eq!(g.snap(13500, r, 1_000_000), 25000); // idx 0.52 → k=1
@@ -438,7 +524,11 @@ mod tests {
 
     #[test]
     fn grid_step_and_bars() {
-        let g = Grid { bpm: 120.0, anchor: 0, beats_per_bar: 4 };
+        let g = Grid {
+            bpm: 120.0,
+            anchor: 0,
+            beats_per_bar: 4,
+        };
         let r = 48000;
         assert_eq!(g.step(0, 1, false, r, 10_000_000), 24000);
         assert_eq!(g.step(24000, 1, false, r, 10_000_000), 48000);
@@ -448,7 +538,11 @@ mod tests {
         assert_eq!(g.beats_in(0, 96000, r).len(), 4);
         assert_eq!(g.bars_in(0, 96000 * 8, r, 2).len(), 4);
         assert_eq!(g.bar_number(0, r), 1);
-        let g2 = Grid { bpm: 120.0, anchor: 96000 * 4, beats_per_bar: 4 };
+        let g2 = Grid {
+            bpm: 120.0,
+            anchor: 96000 * 4,
+            beats_per_bar: 4,
+        };
         assert_eq!(g2.lead_in_bars(r), 4);
         assert_eq!(g2.bar_number(0, r), 5);
     }

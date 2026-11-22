@@ -48,6 +48,7 @@ pub enum Cmd {
     SpeedDownBig,
     SpeedReset,
     KeepAliveToggle,
+    RenderCycle,
     ReloadConfig,
     ShowConfigPath,
     DetectBeats,
@@ -82,67 +83,218 @@ pub struct CommandInfo {
 }
 
 const fn c(cmd: Cmd, id: &'static str, name: &'static str, category: &'static str) -> CommandInfo {
-    CommandInfo { cmd, name, category, id }
+    CommandInfo {
+        cmd,
+        name,
+        category,
+        id,
+    }
 }
 
 const BASE: &[CommandInfo] = &[
     c(Cmd::Open, "open", "Open file", "file"),
     c(Cmd::Save, "save", "Save", "file"),
     c(Cmd::SaveAs, "save_as", "Save as", "file"),
-    c(Cmd::ExportSelection, "export_selection", "Export selection", "file"),
-    c(Cmd::ExportPieces, "export_pieces", "Export pieces between slice points", "file"),
+    c(
+        Cmd::ExportSelection,
+        "export_selection",
+        "Export selection",
+        "file",
+    ),
+    c(
+        Cmd::ExportPieces,
+        "export_pieces",
+        "Export pieces between slice points",
+        "file",
+    ),
     c(Cmd::Quit, "quit", "Quit", "file"),
-    c(Cmd::ShowConfigPath, "show_config_path", "Settings: show the config file path (~/.swell.toml)", "file"),
-    c(Cmd::ReloadConfig, "reload_config", "Reload settings from ~/.swell.toml", "file"),
+    c(
+        Cmd::ShowConfigPath,
+        "show_config_path",
+        "Settings: show the config file path (~/.swell.toml)",
+        "file",
+    ),
+    c(
+        Cmd::ReloadConfig,
+        "reload_config",
+        "Reload settings from ~/.swell.toml",
+        "file",
+    ),
     c(Cmd::Help, "help", "Help: key reference", "view"),
     c(Cmd::Palette, "palette", "Command palette", "view"),
     c(Cmd::PlayPause, "play_pause", "Play / pause", "transport"),
     c(Cmd::Stop, "stop", "Stop", "transport"),
-    c(Cmd::CursorToPlayhead, "cursor_to_playhead", "Move cursor to playhead", "transport"),
+    c(
+        Cmd::CursorToPlayhead,
+        "cursor_to_playhead",
+        "Move cursor to playhead",
+        "transport",
+    ),
     c(Cmd::SpeedUp, "speed_up", "Speed +1%", "transport"),
     c(Cmd::SpeedDown, "speed_down", "Speed -1%", "transport"),
     c(Cmd::SpeedUpBig, "speed_up_big", "Speed +10%", "transport"),
-    c(Cmd::SpeedDownBig, "speed_down_big", "Speed -10%", "transport"),
+    c(
+        Cmd::SpeedDownBig,
+        "speed_down_big",
+        "Speed -10%",
+        "transport",
+    ),
     c(Cmd::SpeedReset, "speed_reset", "Speed 100%", "transport"),
-    c(Cmd::KeepAliveToggle, "keep_alive_toggle", "Output keep-alive while idle: cycle off / dither / tone (stops device mute & fade-in)", "transport"),
+    c(
+        Cmd::KeepAliveToggle,
+        "keep_alive_toggle",
+        "Output keep-alive while idle: cycle off / dither / tone (stops device mute & fade-in)",
+        "transport",
+    ),
     c(Cmd::SelectAll, "select_all", "Select all", "select"),
-    c(Cmd::ClearSelection, "clear_selection", "Clear selection", "select"),
-    c(Cmd::SelStartHere, "sel_start_here", "Selection start = cursor", "select"),
-    c(Cmd::SelEndHere, "sel_end_here", "Selection end = cursor", "select"),
+    c(
+        Cmd::ClearSelection,
+        "clear_selection",
+        "Clear selection",
+        "select",
+    ),
+    c(
+        Cmd::SelStartHere,
+        "sel_start_here",
+        "Selection start = cursor",
+        "select",
+    ),
+    c(
+        Cmd::SelEndHere,
+        "sel_end_here",
+        "Selection end = cursor",
+        "select",
+    ),
     c(Cmd::GoStart, "go_start", "Go to start", "select"),
     c(Cmd::GoEnd, "go_end", "Go to end", "select"),
-    c(Cmd::LoopToggle, "loop_toggle", "Loop = selection (toggle)", "loop"),
+    c(
+        Cmd::LoopToggle,
+        "loop_toggle",
+        "Loop = selection (toggle)",
+        "loop",
+    ),
     c(Cmd::LoopClear, "loop_clear", "Clear loop", "loop"),
-    c(Cmd::SliceToggle, "slice_toggle", "Add / remove slice point at cursor", "slice"),
-    c(Cmd::SlicesClear, "slices_clear", "Clear all slice points", "slice"),
+    c(
+        Cmd::SliceToggle,
+        "slice_toggle",
+        "Add / remove slice point at cursor",
+        "slice",
+    ),
+    c(
+        Cmd::SlicesClear,
+        "slices_clear",
+        "Clear all slice points",
+        "slice",
+    ),
     c(Cmd::SliceNext, "slice_next", "Next slice point", "slice"),
-    c(Cmd::SlicePrev, "slice_prev", "Previous slice point", "slice"),
+    c(
+        Cmd::SlicePrev,
+        "slice_prev",
+        "Previous slice point",
+        "slice",
+    ),
+    c(
+        Cmd::RenderCycle,
+        "render_cycle",
+        "Waveform rendering: cycle blocks / quads / sextants / braille / ascii",
+        "view",
+    ),
     c(Cmd::ZoomIn, "zoom_in", "Zoom in", "view"),
     c(Cmd::ZoomOut, "zoom_out", "Zoom out", "view"),
     c(Cmd::ZoomFit, "zoom_fit", "Zoom to fit", "view"),
     c(Cmd::ZoomSel, "zoom_sel", "Zoom to selection", "view"),
     c(Cmd::ScrollLeft, "scroll_left", "Scroll left", "view"),
     c(Cmd::ScrollRight, "scroll_right", "Scroll right", "view"),
-    c(Cmd::GridBarStart, "grid_bar_start", "Mark bar start = cursor (downbeat)", "beats"),
-    c(Cmd::GridBarEnd, "grid_bar_end", "Mark bar end = cursor (sets tempo from the bar)", "beats"),
-    c(Cmd::GridBarFromSelection, "grid_bar_from_selection", "Mark bar = selection / loop (sets tempo)", "beats"),
-    c(Cmd::DetectBeats, "detect_beats", "Beat analysis: detect BPM & beats, seeded by the marked bar", "beats"),
+    c(
+        Cmd::GridBarStart,
+        "grid_bar_start",
+        "Mark bar start = cursor (downbeat)",
+        "beats",
+    ),
+    c(
+        Cmd::GridBarEnd,
+        "grid_bar_end",
+        "Mark bar end = cursor (sets tempo from the bar)",
+        "beats",
+    ),
+    c(
+        Cmd::GridBarFromSelection,
+        "grid_bar_from_selection",
+        "Mark bar = selection / loop (sets tempo)",
+        "beats",
+    ),
+    c(
+        Cmd::DetectBeats,
+        "detect_beats",
+        "Beat analysis: detect BPM & beats, seeded by the marked bar",
+        "beats",
+    ),
     c(Cmd::GridSetBpm, "grid_set_bpm", "Grid: set BPM…", "beats"),
-    c(Cmd::GridNudgeEarlier, "grid_nudge_earlier", "Grid: nudge earlier 1 ms", "beats"),
-    c(Cmd::GridNudgeLater, "grid_nudge_later", "Grid: nudge later 1 ms", "beats"),
-    c(Cmd::GridOffset, "grid_offset", "Grid: shift by ms…", "beats"),
+    c(
+        Cmd::GridNudgeEarlier,
+        "grid_nudge_earlier",
+        "Grid: nudge earlier 1 ms",
+        "beats",
+    ),
+    c(
+        Cmd::GridNudgeLater,
+        "grid_nudge_later",
+        "Grid: nudge later 1 ms",
+        "beats",
+    ),
+    c(
+        Cmd::GridOffset,
+        "grid_offset",
+        "Grid: shift by ms…",
+        "beats",
+    ),
     c(Cmd::GridBpmDown, "grid_bpm_down", "Grid: BPM -0.1", "beats"),
     c(Cmd::GridBpmUp, "grid_bpm_up", "Grid: BPM +0.1", "beats"),
     c(Cmd::GridDouble, "grid_double", "Grid: double BPM", "beats"),
     c(Cmd::GridHalve, "grid_halve", "Grid: halve BPM", "beats"),
-    c(Cmd::GridBeatsPerBar, "grid_beats_per_bar", "Grid: beats per bar…", "beats"),
+    c(
+        Cmd::GridBeatsPerBar,
+        "grid_beats_per_bar",
+        "Grid: beats per bar…",
+        "beats",
+    ),
     c(Cmd::GridClear, "grid_clear", "Grid: clear", "beats"),
-    c(Cmd::SnapToggle, "snap_toggle", "Snap cursor/selection to beats (toggle)", "beats"),
-    c(Cmd::ConformBars, "conform_bars", "Conform to bars: lead-in N bars, pad end to whole bar…", "beats"),
-    c(Cmd::SelectBars, "select_bars", "Select N bars from cursor…", "beats"),
-    c(Cmd::SliceAtBars, "slice_at_bars", "Slice at every N bars…", "beats"),
-    c(Cmd::SliceAtBeats, "slice_at_beats", "Slice at every beat", "beats"),
-    c(Cmd::ExportMarkers, "export_markers", "Export bar/beat markers (Audacity labels .txt)…", "beats"),
+    c(
+        Cmd::SnapToggle,
+        "snap_toggle",
+        "Snap cursor/selection to beats (toggle)",
+        "beats",
+    ),
+    c(
+        Cmd::ConformBars,
+        "conform_bars",
+        "Conform to bars: lead-in N bars, pad end to whole bar…",
+        "beats",
+    ),
+    c(
+        Cmd::SelectBars,
+        "select_bars",
+        "Select N bars from cursor…",
+        "beats",
+    ),
+    c(
+        Cmd::SliceAtBars,
+        "slice_at_bars",
+        "Slice at every N bars…",
+        "beats",
+    ),
+    c(
+        Cmd::SliceAtBeats,
+        "slice_at_beats",
+        "Slice at every beat",
+        "beats",
+    ),
+    c(
+        Cmd::ExportMarkers,
+        "export_markers",
+        "Export bar/beat markers (Audacity labels .txt)…",
+        "beats",
+    ),
     c(Cmd::Cut, "cut", "Cut", "edit"),
     c(Cmd::Copy, "copy", "Copy", "edit"),
     c(Cmd::Paste, "paste", "Paste", "edit"),
@@ -166,9 +318,13 @@ fn snake(name: &str) -> String {
 pub fn all() -> &'static [CommandInfo] {
     static ALL: OnceLock<Vec<CommandInfo>> = OnceLock::new();
     ALL.get_or_init(|| {
-        let mut v: Vec<CommandInfo> = BASE.iter().map(|b| c(b.cmd, b.id, b.name, b.category)).collect();
+        let mut v: Vec<CommandInfo> = BASE
+            .iter()
+            .map(|b| c(b.cmd, b.id, b.name, b.category))
+            .collect();
         for i in fx::ALL {
-            let id: &'static str = Box::leak(format!("fx.{}", snake(&format!("{:?}", i.kind))).into_boxed_str());
+            let id: &'static str =
+                Box::leak(format!("fx.{}", snake(&format!("{:?}", i.kind))).into_boxed_str());
             v.push(c(Cmd::Fx(i.kind), id, i.name, i.category));
         }
         v
@@ -176,7 +332,11 @@ pub fn all() -> &'static [CommandInfo] {
 }
 
 pub fn id_of(cmd: Cmd) -> &'static str {
-    all().iter().find(|c| c.cmd == cmd).map(|c| c.id).unwrap_or("?")
+    all()
+        .iter()
+        .find(|c| c.cmd == cmd)
+        .map(|c| c.id)
+        .unwrap_or("?")
 }
 
 pub fn by_id(id: &str) -> Option<Cmd> {
@@ -223,6 +383,7 @@ pub const DEFAULT_KEYS: &[(&str, Cmd)] = &[
     ("_", Cmd::SpeedDownBig),
     ("0", Cmd::ZoomFit),
     ("z", Cmd::ZoomSel),
+    ("R", Cmd::RenderCycle),
     ("x", Cmd::Cut),
     ("c", Cmd::Copy),
     ("v", Cmd::Paste),
@@ -310,7 +471,11 @@ pub fn parse_key(spec: &str) -> Option<KeyChord> {
         "up" => KeyCode::Up,
         "down" => KeyCode::Down,
         _ => {
-            if let Some(n) = lower.strip_prefix('f').and_then(|n| n.parse::<u8>().ok()).filter(|n| (1..=12).contains(n)) {
+            if let Some(n) = lower
+                .strip_prefix('f')
+                .and_then(|n| n.parse::<u8>().ok())
+                .filter(|n| (1..=12).contains(n))
+            {
                 KeyCode::F(n)
             } else {
                 let mut chars = key.chars();
@@ -318,13 +483,20 @@ pub fn parse_key(spec: &str) -> Option<KeyChord> {
                 if chars.next().is_some() {
                     return None;
                 }
-                let ch = if mods.contains(KeyModifiers::SHIFT) && ch.is_alphabetic() { ch.to_ascii_uppercase() } else { ch };
+                let ch = if mods.contains(KeyModifiers::SHIFT) && ch.is_alphabetic() {
+                    ch.to_ascii_uppercase()
+                } else {
+                    ch
+                };
                 KeyCode::Char(ch)
             }
         }
     };
     if code == KeyCode::Tab && mods.contains(KeyModifiers::SHIFT) {
-        return Some(KeyChord { code: KeyCode::BackTab, mods: KeyModifiers::empty() });
+        return Some(KeyChord {
+            code: KeyCode::BackTab,
+            mods: KeyModifiers::empty(),
+        });
     }
     if matches!(code, KeyCode::Char(_)) {
         mods -= KeyModifiers::SHIFT;
@@ -370,7 +542,11 @@ pub fn format_key(k: &KeyChord) -> String {
 
 /// Fuzzy subsequence match of `query` against `text`. Higher is better; None = no match.
 pub fn fuzzy_score(query: &str, text: &str) -> Option<i32> {
-    let q: Vec<char> = query.chars().flat_map(|c| c.to_lowercase()).filter(|c| !c.is_whitespace()).collect();
+    let q: Vec<char> = query
+        .chars()
+        .flat_map(|c| c.to_lowercase())
+        .filter(|c| !c.is_whitespace())
+        .collect();
     if q.is_empty() {
         return Some(0);
     }
@@ -428,13 +604,31 @@ mod tests {
     #[test]
     fn key_parsing() {
         let k = parse_key("ctrl+s").unwrap();
-        assert_eq!(k, KeyChord { code: KeyCode::Char('s'), mods: KeyModifiers::CONTROL });
-        assert_eq!(parse_key("W").unwrap(), KeyChord { code: KeyCode::Char('W'), mods: KeyModifiers::empty() });
+        assert_eq!(
+            k,
+            KeyChord {
+                code: KeyCode::Char('s'),
+                mods: KeyModifiers::CONTROL
+            }
+        );
+        assert_eq!(
+            parse_key("W").unwrap(),
+            KeyChord {
+                code: KeyCode::Char('W'),
+                mods: KeyModifiers::empty()
+            }
+        );
         assert_eq!(parse_key("shift+w").unwrap(), parse_key("W").unwrap());
         assert_eq!(parse_key("shift+tab").unwrap().code, KeyCode::BackTab);
         assert_eq!(parse_key("F1").unwrap().code, KeyCode::F(1));
         assert_eq!(parse_key("+").unwrap().code, KeyCode::Char('+'));
-        assert_eq!(parse_key("ctrl++").unwrap(), KeyChord { code: KeyCode::Char('+'), mods: KeyModifiers::CONTROL });
+        assert_eq!(
+            parse_key("ctrl++").unwrap(),
+            KeyChord {
+                code: KeyCode::Char('+'),
+                mods: KeyModifiers::CONTROL
+            }
+        );
         assert!(parse_key("ctrl+").is_none());
         assert!(parse_key("hyper+x").is_none());
         assert!(parse_key("ab").is_none());
@@ -452,7 +646,10 @@ mod tests {
     fn fuzzy_prefers_word_starts() {
         let r = search("rev");
         let names: Vec<&str> = r.iter().take(2).map(|&i| all()[i].name).collect();
-        assert!(names.contains(&"Reverb") && names.contains(&"Reverse"), "{names:?}");
+        assert!(
+            names.contains(&"Reverb") && names.contains(&"Reverse"),
+            "{names:?}"
+        );
         assert!(search("zzzz").is_empty());
         assert_eq!(search("").len(), all().len());
         let top = all()[search("fade in")[0]].name;

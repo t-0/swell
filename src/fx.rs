@@ -2,7 +2,7 @@
 //! the range's length (the result reports the new end frame).
 
 use crate::audio::Audio;
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use std::f32::consts::TAU;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
@@ -69,7 +69,12 @@ pub struct Param {
 }
 
 const fn p(name: &'static str, default: f64, min: f64, max: f64) -> Param {
-    Param { name, default, min, max }
+    Param {
+        name,
+        default,
+        min,
+        max,
+    }
 }
 
 pub struct FxInfo {
@@ -83,69 +88,393 @@ pub struct FxInfo {
     pub whole_file: bool,
 }
 
-const fn fx(kind: FxKind, name: &'static str, category: &'static str, params: &'static [Param]) -> FxInfo {
-    FxInfo { kind, name, category, params, insert: false, whole_file: false }
+const fn fx(
+    kind: FxKind,
+    name: &'static str,
+    category: &'static str,
+    params: &'static [Param],
+) -> FxInfo {
+    FxInfo {
+        kind,
+        name,
+        category,
+        params,
+        insert: false,
+        whole_file: false,
+    }
 }
-const fn ins(kind: FxKind, name: &'static str, category: &'static str, params: &'static [Param]) -> FxInfo {
-    FxInfo { kind, name, category, params, insert: true, whole_file: false }
+const fn ins(
+    kind: FxKind,
+    name: &'static str,
+    category: &'static str,
+    params: &'static [Param],
+) -> FxInfo {
+    FxInfo {
+        kind,
+        name,
+        category,
+        params,
+        insert: true,
+        whole_file: false,
+    }
 }
-const fn whole(kind: FxKind, name: &'static str, category: &'static str, params: &'static [Param]) -> FxInfo {
-    FxInfo { kind, name, category, params, insert: false, whole_file: true }
+const fn whole(
+    kind: FxKind,
+    name: &'static str,
+    category: &'static str,
+    params: &'static [Param],
+) -> FxInfo {
+    FxInfo {
+        kind,
+        name,
+        category,
+        params,
+        insert: false,
+        whole_file: true,
+    }
 }
 
 pub const ALL: &[FxInfo] = &[
-    fx(FxKind::Gain, "Gain", "amplitude", &[p("gain dB", 0.0, -60.0, 60.0)]),
-    fx(FxKind::Normalize, "Normalize", "amplitude", &[p("peak dB", 0.0, -60.0, 0.0)]),
-    fx(FxKind::FadeIn, "Fade in", "amplitude", &[p("curve (1 linear, 2 slow start, 0.5 fast start)", 1.0, 0.1, 10.0)]),
-    fx(FxKind::FadeOut, "Fade out", "amplitude", &[p("curve (1 linear, 2 slow end, 0.5 fast end)", 1.0, 0.1, 10.0)]),
+    fx(
+        FxKind::Gain,
+        "Gain",
+        "amplitude",
+        &[p("gain dB", 0.0, -60.0, 60.0)],
+    ),
+    fx(
+        FxKind::Normalize,
+        "Normalize",
+        "amplitude",
+        &[p("peak dB", 0.0, -60.0, 0.0)],
+    ),
+    fx(
+        FxKind::FadeIn,
+        "Fade in",
+        "amplitude",
+        &[p(
+            "curve (1 linear, 2 slow start, 0.5 fast start)",
+            1.0,
+            0.1,
+            10.0,
+        )],
+    ),
+    fx(
+        FxKind::FadeOut,
+        "Fade out",
+        "amplitude",
+        &[p(
+            "curve (1 linear, 2 slow end, 0.5 fast end)",
+            1.0,
+            0.1,
+            10.0,
+        )],
+    ),
     fx(FxKind::Invert, "Invert polarity", "amplitude", &[]),
     fx(FxKind::Silence, "Silence (zero out)", "amplitude", &[]),
     fx(FxKind::RemoveDc, "Remove DC offset", "amplitude", &[]),
-    fx(FxKind::Compressor, "Compressor", "dynamics", &[
-        p("threshold dB", -20.0, -60.0, 0.0), p("ratio", 4.0, 1.0, 100.0),
-        p("attack ms", 10.0, 0.1, 500.0), p("release ms", 100.0, 1.0, 5000.0), p("makeup dB", 0.0, -20.0, 40.0),
-    ]),
-    fx(FxKind::Limiter, "Limiter", "dynamics", &[p("ceiling dB", -1.0, -30.0, 0.0), p("release ms", 50.0, 1.0, 2000.0)]),
-    fx(FxKind::Gate, "Noise gate", "dynamics", &[p("threshold dB", -40.0, -90.0, 0.0), p("attack ms", 1.0, 0.1, 500.0), p("release ms", 100.0, 1.0, 5000.0)]),
-    fx(FxKind::Tremolo, "Tremolo", "modulation", &[p("rate Hz", 5.0, 0.01, 50.0), p("depth 0-1", 0.6, 0.0, 1.0)]),
-    fx(FxKind::AutoPan, "Auto-pan (stereo)", "modulation", &[p("rate Hz", 0.5, 0.01, 20.0), p("depth 0-1", 1.0, 0.0, 1.0)]),
-    fx(FxKind::LowPass, "Low-pass filter", "filter", &[p("cutoff Hz", 2000.0, 10.0, 22000.0), p("Q", 0.707, 0.1, 20.0)]),
-    fx(FxKind::HighPass, "High-pass filter", "filter", &[p("cutoff Hz", 200.0, 10.0, 22000.0), p("Q", 0.707, 0.1, 20.0)]),
-    fx(FxKind::BandPass, "Band-pass filter", "filter", &[p("center Hz", 1000.0, 10.0, 22000.0), p("Q", 1.0, 0.1, 50.0)]),
-    fx(FxKind::Notch, "Notch filter", "filter", &[p("center Hz", 60.0, 10.0, 22000.0), p("Q", 10.0, 0.1, 100.0)]),
-    fx(FxKind::LowShelf, "Low shelf EQ", "filter", &[p("freq Hz", 200.0, 10.0, 22000.0), p("gain dB", 3.0, -30.0, 30.0)]),
-    fx(FxKind::HighShelf, "High shelf EQ", "filter", &[p("freq Hz", 4000.0, 10.0, 22000.0), p("gain dB", 3.0, -30.0, 30.0)]),
-    fx(FxKind::Peaking, "Peaking EQ", "filter", &[p("freq Hz", 1000.0, 10.0, 22000.0), p("gain dB", 3.0, -30.0, 30.0), p("Q", 1.0, 0.1, 50.0)]),
+    fx(
+        FxKind::Compressor,
+        "Compressor",
+        "dynamics",
+        &[
+            p("threshold dB", -20.0, -60.0, 0.0),
+            p("ratio", 4.0, 1.0, 100.0),
+            p("attack ms", 10.0, 0.1, 500.0),
+            p("release ms", 100.0, 1.0, 5000.0),
+            p("makeup dB", 0.0, -20.0, 40.0),
+        ],
+    ),
+    fx(
+        FxKind::Limiter,
+        "Limiter",
+        "dynamics",
+        &[
+            p("ceiling dB", -1.0, -30.0, 0.0),
+            p("release ms", 50.0, 1.0, 2000.0),
+        ],
+    ),
+    fx(
+        FxKind::Gate,
+        "Noise gate",
+        "dynamics",
+        &[
+            p("threshold dB", -40.0, -90.0, 0.0),
+            p("attack ms", 1.0, 0.1, 500.0),
+            p("release ms", 100.0, 1.0, 5000.0),
+        ],
+    ),
+    fx(
+        FxKind::Tremolo,
+        "Tremolo",
+        "modulation",
+        &[p("rate Hz", 5.0, 0.01, 50.0), p("depth 0-1", 0.6, 0.0, 1.0)],
+    ),
+    fx(
+        FxKind::AutoPan,
+        "Auto-pan (stereo)",
+        "modulation",
+        &[p("rate Hz", 0.5, 0.01, 20.0), p("depth 0-1", 1.0, 0.0, 1.0)],
+    ),
+    fx(
+        FxKind::LowPass,
+        "Low-pass filter",
+        "filter",
+        &[
+            p("cutoff Hz", 2000.0, 10.0, 22000.0),
+            p("Q", 0.707, 0.1, 20.0),
+        ],
+    ),
+    fx(
+        FxKind::HighPass,
+        "High-pass filter",
+        "filter",
+        &[
+            p("cutoff Hz", 200.0, 10.0, 22000.0),
+            p("Q", 0.707, 0.1, 20.0),
+        ],
+    ),
+    fx(
+        FxKind::BandPass,
+        "Band-pass filter",
+        "filter",
+        &[
+            p("center Hz", 1000.0, 10.0, 22000.0),
+            p("Q", 1.0, 0.1, 50.0),
+        ],
+    ),
+    fx(
+        FxKind::Notch,
+        "Notch filter",
+        "filter",
+        &[
+            p("center Hz", 60.0, 10.0, 22000.0),
+            p("Q", 10.0, 0.1, 100.0),
+        ],
+    ),
+    fx(
+        FxKind::LowShelf,
+        "Low shelf EQ",
+        "filter",
+        &[
+            p("freq Hz", 200.0, 10.0, 22000.0),
+            p("gain dB", 3.0, -30.0, 30.0),
+        ],
+    ),
+    fx(
+        FxKind::HighShelf,
+        "High shelf EQ",
+        "filter",
+        &[
+            p("freq Hz", 4000.0, 10.0, 22000.0),
+            p("gain dB", 3.0, -30.0, 30.0),
+        ],
+    ),
+    fx(
+        FxKind::Peaking,
+        "Peaking EQ",
+        "filter",
+        &[
+            p("freq Hz", 1000.0, 10.0, 22000.0),
+            p("gain dB", 3.0, -30.0, 30.0),
+            p("Q", 1.0, 0.1, 50.0),
+        ],
+    ),
     fx(FxKind::Telephone, "Telephone (300-3400 Hz)", "filter", &[]),
-    fx(FxKind::Delay, "Delay / echo", "delay", &[p("time ms", 300.0, 1.0, 5000.0), p("feedback 0-1", 0.4, 0.0, 0.95), p("mix 0-1", 0.4, 0.0, 1.0)]),
-    fx(FxKind::PingPong, "Ping-pong delay (stereo)", "delay", &[p("time ms", 300.0, 1.0, 5000.0), p("feedback 0-1", 0.5, 0.0, 0.95), p("mix 0-1", 0.4, 0.0, 1.0)]),
-    fx(FxKind::Reverb, "Reverb", "delay", &[p("room 0-1", 0.7, 0.0, 1.0), p("damping 0-1", 0.5, 0.0, 1.0), p("mix 0-1", 0.3, 0.0, 1.0), p("tail s", 2.0, 0.0, 20.0)]),
-    fx(FxKind::Chorus, "Chorus", "modulation", &[p("rate Hz", 0.8, 0.01, 10.0), p("depth ms", 4.0, 0.1, 20.0), p("mix 0-1", 0.5, 0.0, 1.0)]),
-    fx(FxKind::Flanger, "Flanger", "modulation", &[p("rate Hz", 0.3, 0.01, 10.0), p("depth ms", 2.0, 0.1, 10.0), p("feedback 0-1", 0.5, 0.0, 0.95), p("mix 0-1", 0.7, 0.0, 1.0)]),
-    fx(FxKind::Phaser, "Phaser", "modulation", &[p("rate Hz", 0.5, 0.01, 10.0), p("stages", 4.0, 2.0, 12.0), p("feedback 0-1", 0.3, 0.0, 0.95), p("mix 0-1", 0.5, 0.0, 1.0)]),
-    fx(FxKind::Vibrato, "Vibrato", "modulation", &[p("rate Hz", 5.0, 0.01, 20.0), p("depth ms", 1.0, 0.05, 10.0)]),
-    fx(FxKind::RingMod, "Ring modulator", "modulation", &[p("freq Hz", 440.0, 0.1, 20000.0), p("mix 0-1", 1.0, 0.0, 1.0)]),
-    fx(FxKind::BitCrush, "Bit crusher", "distortion", &[p("bits", 8.0, 1.0, 16.0), p("downsample factor", 1.0, 1.0, 64.0)]),
-    fx(FxKind::Overdrive, "Overdrive (soft clip)", "distortion", &[p("drive 1-50", 5.0, 1.0, 50.0), p("output dB", 0.0, -30.0, 12.0)]),
-    fx(FxKind::HardClip, "Hard clip", "distortion", &[p("threshold dB", -6.0, -40.0, 0.0), p("output dB", 0.0, -30.0, 12.0)]),
+    fx(
+        FxKind::Delay,
+        "Delay / echo",
+        "delay",
+        &[
+            p("time ms", 300.0, 1.0, 5000.0),
+            p("feedback 0-1", 0.4, 0.0, 0.95),
+            p("mix 0-1", 0.4, 0.0, 1.0),
+        ],
+    ),
+    fx(
+        FxKind::PingPong,
+        "Ping-pong delay (stereo)",
+        "delay",
+        &[
+            p("time ms", 300.0, 1.0, 5000.0),
+            p("feedback 0-1", 0.5, 0.0, 0.95),
+            p("mix 0-1", 0.4, 0.0, 1.0),
+        ],
+    ),
+    fx(
+        FxKind::Reverb,
+        "Reverb",
+        "delay",
+        &[
+            p("room 0-1", 0.7, 0.0, 1.0),
+            p("damping 0-1", 0.5, 0.0, 1.0),
+            p("mix 0-1", 0.3, 0.0, 1.0),
+            p("tail s", 2.0, 0.0, 20.0),
+        ],
+    ),
+    fx(
+        FxKind::Chorus,
+        "Chorus",
+        "modulation",
+        &[
+            p("rate Hz", 0.8, 0.01, 10.0),
+            p("depth ms", 4.0, 0.1, 20.0),
+            p("mix 0-1", 0.5, 0.0, 1.0),
+        ],
+    ),
+    fx(
+        FxKind::Flanger,
+        "Flanger",
+        "modulation",
+        &[
+            p("rate Hz", 0.3, 0.01, 10.0),
+            p("depth ms", 2.0, 0.1, 10.0),
+            p("feedback 0-1", 0.5, 0.0, 0.95),
+            p("mix 0-1", 0.7, 0.0, 1.0),
+        ],
+    ),
+    fx(
+        FxKind::Phaser,
+        "Phaser",
+        "modulation",
+        &[
+            p("rate Hz", 0.5, 0.01, 10.0),
+            p("stages", 4.0, 2.0, 12.0),
+            p("feedback 0-1", 0.3, 0.0, 0.95),
+            p("mix 0-1", 0.5, 0.0, 1.0),
+        ],
+    ),
+    fx(
+        FxKind::Vibrato,
+        "Vibrato",
+        "modulation",
+        &[
+            p("rate Hz", 5.0, 0.01, 20.0),
+            p("depth ms", 1.0, 0.05, 10.0),
+        ],
+    ),
+    fx(
+        FxKind::RingMod,
+        "Ring modulator",
+        "modulation",
+        &[
+            p("freq Hz", 440.0, 0.1, 20000.0),
+            p("mix 0-1", 1.0, 0.0, 1.0),
+        ],
+    ),
+    fx(
+        FxKind::BitCrush,
+        "Bit crusher",
+        "distortion",
+        &[
+            p("bits", 8.0, 1.0, 16.0),
+            p("downsample factor", 1.0, 1.0, 64.0),
+        ],
+    ),
+    fx(
+        FxKind::Overdrive,
+        "Overdrive (soft clip)",
+        "distortion",
+        &[
+            p("drive 1-50", 5.0, 1.0, 50.0),
+            p("output dB", 0.0, -30.0, 12.0),
+        ],
+    ),
+    fx(
+        FxKind::HardClip,
+        "Hard clip",
+        "distortion",
+        &[
+            p("threshold dB", -6.0, -40.0, 0.0),
+            p("output dB", 0.0, -30.0, 12.0),
+        ],
+    ),
     fx(FxKind::Reverse, "Reverse", "time", &[]),
-    fx(FxKind::ChangeSpeed, "Change speed (pitch follows, like the slider)", "time", &[p("speed %", 100.0, 10.0, 400.0)]),
-    fx(FxKind::TimeStretch, "Time stretch (keep pitch)", "time", &[p("length %", 100.0, 25.0, 400.0)]),
-    fx(FxKind::PitchShift, "Pitch shift (keep length)", "time", &[p("semitones", 0.0, -24.0, 24.0)]),
-    fx(FxKind::Repeat, "Repeat selection", "time", &[p("extra copies", 1.0, 1.0, 100.0)]),
-    ins(FxKind::InsertSilence, "Insert silence", "time", &[p("seconds", 1.0, 0.001, 600.0)]),
-    fx(FxKind::TrimSilence, "Trim silence from ends", "time", &[p("threshold dB", -50.0, -100.0, 0.0)]),
-    whole(FxKind::ResampleFile, "Resample file (change sample rate)", "time", &[p("sample rate Hz", 44100.0, 4000.0, 192000.0)]),
-    fx(FxKind::SwapChannels, "Swap channels (stereo)", "stereo", &[]),
+    fx(
+        FxKind::ChangeSpeed,
+        "Change speed (pitch follows, like the slider)",
+        "time",
+        &[p("speed %", 100.0, 10.0, 400.0)],
+    ),
+    fx(
+        FxKind::TimeStretch,
+        "Time stretch (keep pitch)",
+        "time",
+        &[p("length %", 100.0, 25.0, 400.0)],
+    ),
+    fx(
+        FxKind::PitchShift,
+        "Pitch shift (keep length)",
+        "time",
+        &[p("semitones", 0.0, -24.0, 24.0)],
+    ),
+    fx(
+        FxKind::Repeat,
+        "Repeat selection",
+        "time",
+        &[p("extra copies", 1.0, 1.0, 100.0)],
+    ),
+    ins(
+        FxKind::InsertSilence,
+        "Insert silence",
+        "time",
+        &[p("seconds", 1.0, 0.001, 600.0)],
+    ),
+    fx(
+        FxKind::TrimSilence,
+        "Trim silence from ends",
+        "time",
+        &[p("threshold dB", -50.0, -100.0, 0.0)],
+    ),
+    whole(
+        FxKind::ResampleFile,
+        "Resample file (change sample rate)",
+        "time",
+        &[p("sample rate Hz", 44100.0, 4000.0, 192000.0)],
+    ),
+    fx(
+        FxKind::SwapChannels,
+        "Swap channels (stereo)",
+        "stereo",
+        &[],
+    ),
     fx(FxKind::Mono, "Mix to mono", "stereo", &[]),
-    fx(FxKind::StereoWidth, "Stereo width (stereo)", "stereo", &[p("width 0-2", 1.5, 0.0, 2.0)]),
-    fx(FxKind::Pan, "Pan (stereo)", "stereo", &[p("pan -1 left .. 1 right", 0.0, -1.0, 1.0)]),
-    ins(FxKind::GenTone, "Generate tone", "generate", &[p("freq Hz", 440.0, 1.0, 20000.0), p("seconds", 1.0, 0.001, 600.0), p("level dB", -6.0, -60.0, 0.0)]),
-    ins(FxKind::GenNoise, "Generate white noise", "generate", &[p("seconds", 1.0, 0.001, 600.0), p("level dB", -12.0, -60.0, 0.0)]),
+    fx(
+        FxKind::StereoWidth,
+        "Stereo width (stereo)",
+        "stereo",
+        &[p("width 0-2", 1.5, 0.0, 2.0)],
+    ),
+    fx(
+        FxKind::Pan,
+        "Pan (stereo)",
+        "stereo",
+        &[p("pan -1 left .. 1 right", 0.0, -1.0, 1.0)],
+    ),
+    ins(
+        FxKind::GenTone,
+        "Generate tone",
+        "generate",
+        &[
+            p("freq Hz", 440.0, 1.0, 20000.0),
+            p("seconds", 1.0, 0.001, 600.0),
+            p("level dB", -6.0, -60.0, 0.0),
+        ],
+    ),
+    ins(
+        FxKind::GenNoise,
+        "Generate white noise",
+        "generate",
+        &[
+            p("seconds", 1.0, 0.001, 600.0),
+            p("level dB", -12.0, -60.0, 0.0),
+        ],
+    ),
 ];
 
 pub fn info(kind: FxKind) -> &'static FxInfo {
-    ALL.iter().find(|i| i.kind == kind).expect("every FxKind is listed in ALL")
+    ALL.iter()
+        .find(|i| i.kind == kind)
+        .expect("every FxKind is listed in ALL")
 }
 
 pub struct FxOut {
@@ -154,7 +483,10 @@ pub struct FxOut {
 }
 
 fn ok(new_end: usize) -> Result<FxOut> {
-    Ok(FxOut { note: String::new(), new_end })
+    Ok(FxOut {
+        note: String::new(),
+        new_end,
+    })
 }
 
 fn db(x: f64) -> f32 {
@@ -187,7 +519,10 @@ pub fn apply(kind: FxKind, a: &mut Audio, s: usize, e: usize, prm: &[f64]) -> Re
     let nc = a.n_channels();
     let len = e - s;
     let pr = |i: usize| prm.get(i).copied().unwrap_or(info(kind).params[i].default);
-    let generator = matches!(kind, FxKind::GenTone | FxKind::GenNoise | FxKind::InsertSilence);
+    let generator = matches!(
+        kind,
+        FxKind::GenTone | FxKind::GenNoise | FxKind::InsertSilence
+    );
     if len == 0 && !generator && !info(kind).whole_file {
         bail!("empty range");
     }
@@ -204,7 +539,10 @@ pub fn apply(kind: FxKind, a: &mut Audio, s: usize, e: usize, prm: &[f64]) -> Re
         }
         FxKind::Normalize => {
             let g = a.normalize(s, e, db(pr(0)));
-            Ok(FxOut { note: format!(" (gain {:+.2} dB)", to_db(g)), new_end: e })
+            Ok(FxOut {
+                note: format!(" (gain {:+.2} dB)", to_db(g)),
+                new_end: e,
+            })
         }
         FxKind::FadeIn | FxKind::FadeOut => {
             let curve = pr(0) as f32;
@@ -241,7 +579,10 @@ pub fn apply(kind: FxKind, a: &mut Audio, s: usize, e: usize, prm: &[f64]) -> Re
                     *v -= mean;
                 }
             }
-            Ok(FxOut { note: format!(" (offset {:.4})", worst), new_end: e })
+            Ok(FxOut {
+                note: format!(" (offset {:.4})", worst),
+                new_end: e,
+            })
         }
         FxKind::Compressor => {
             compress(a, s, e, pr(0), pr(1), pr(2), pr(3), pr(4));
@@ -379,7 +720,11 @@ pub fn apply(kind: FxKind, a: &mut Audio, s: usize, e: usize, prm: &[f64]) -> Re
         }
         FxKind::ChangeSpeed => {
             let step = pr(0) / 100.0;
-            let new: Vec<Vec<f32>> = a.channels.iter().map(|c| resample(&c[s..e], step)).collect();
+            let new: Vec<Vec<f32>> = a
+                .channels
+                .iter()
+                .map(|c| resample(&c[s..e], step))
+                .collect();
             replace_range(a, s, e, &new);
             ok(s + new[0].len())
         }
@@ -419,11 +764,16 @@ pub fn apply(kind: FxKind, a: &mut Audio, s: usize, e: usize, prm: &[f64]) -> Re
             let thr = db(pr(0));
             let loud = |i: usize| a.channels.iter().any(|c| c[i].abs() > thr);
             let first = (s..e).find(|&i| loud(i));
-            let Some(first) = first else { bail!("range is entirely below the threshold") };
+            let Some(first) = first else {
+                bail!("range is entirely below the threshold")
+            };
             let last = (s..e).rev().find(|&i| loud(i)).unwrap();
             a.delete(last + 1, e);
             a.delete(s, first);
-            Ok(FxOut { note: format!(" (removed {} frames)", len - (last + 1 - first)), new_end: s + (last + 1 - first) })
+            Ok(FxOut {
+                note: format!(" (removed {} frames)", len - (last + 1 - first)),
+                new_end: s + (last + 1 - first),
+            })
         }
         FxKind::ResampleFile => {
             let new_rate = pr(0).round() as u32;
@@ -435,7 +785,10 @@ pub fn apply(kind: FxKind, a: &mut Audio, s: usize, e: usize, prm: &[f64]) -> Re
                 *c = resample(c, step);
             }
             a.sample_rate = new_rate;
-            Ok(FxOut { note: format!(" to {} Hz", new_rate), new_end: a.frames() })
+            Ok(FxOut {
+                note: format!(" to {} Hz", new_rate),
+                new_end: a.frames(),
+            })
         }
         FxKind::SwapChannels => {
             need_stereo(a)?;
@@ -470,7 +823,10 @@ pub fn apply(kind: FxKind, a: &mut Audio, s: usize, e: usize, prm: &[f64]) -> Re
         FxKind::Pan => {
             need_stereo(a)?;
             let ang = (pr(0) as f32 + 1.0) * std::f32::consts::FRAC_PI_4;
-            let (gl, gr) = (ang.cos() * std::f32::consts::SQRT_2, ang.sin() * std::f32::consts::SQRT_2);
+            let (gl, gr) = (
+                ang.cos() * std::f32::consts::SQRT_2,
+                ang.sin() * std::f32::consts::SQRT_2,
+            );
             for v in &mut a.channels[0][s..e] {
                 *v *= gl;
             }
@@ -484,7 +840,9 @@ pub fn apply(kind: FxKind, a: &mut Audio, s: usize, e: usize, prm: &[f64]) -> Re
             let n = (secs * fs).round() as usize;
             let mut g = Audio::new(a.sample_rate, nc);
             for c in &mut g.channels {
-                *c = (0..n).map(|i| amp * (TAU * f * i as f32 / fs as f32).sin()).collect();
+                *c = (0..n)
+                    .map(|i| amp * (TAU * f * i as f32 / fs as f32).sin())
+                    .collect();
             }
             a.insert(s, &g);
             ok(s + n)
@@ -577,12 +935,26 @@ impl Biquad {
     fn lowpass(fs: f64, f0: f64, q: f64) -> Biquad {
         let (c, sn) = Self::w(fs, f0);
         let al = sn / (2.0 * q);
-        Self::from_raw((1.0 - c) / 2.0, 1.0 - c, (1.0 - c) / 2.0, 1.0 + al, -2.0 * c, 1.0 - al)
+        Self::from_raw(
+            (1.0 - c) / 2.0,
+            1.0 - c,
+            (1.0 - c) / 2.0,
+            1.0 + al,
+            -2.0 * c,
+            1.0 - al,
+        )
     }
     fn highpass(fs: f64, f0: f64, q: f64) -> Biquad {
         let (c, sn) = Self::w(fs, f0);
         let al = sn / (2.0 * q);
-        Self::from_raw((1.0 + c) / 2.0, -(1.0 + c), (1.0 + c) / 2.0, 1.0 + al, -2.0 * c, 1.0 - al)
+        Self::from_raw(
+            (1.0 + c) / 2.0,
+            -(1.0 + c),
+            (1.0 + c) / 2.0,
+            1.0 + al,
+            -2.0 * c,
+            1.0 - al,
+        )
     }
     fn bandpass(fs: f64, f0: f64, q: f64) -> Biquad {
         let (c, sn) = Self::w(fs, f0);
@@ -598,7 +970,14 @@ impl Biquad {
         let (c, sn) = Self::w(fs, f0);
         let a = 10f64.powf(gain_db / 40.0);
         let al = sn / (2.0 * q);
-        Self::from_raw(1.0 + al * a, -2.0 * c, 1.0 - al * a, 1.0 + al / a, -2.0 * c, 1.0 - al / a)
+        Self::from_raw(
+            1.0 + al * a,
+            -2.0 * c,
+            1.0 - al * a,
+            1.0 + al / a,
+            -2.0 * c,
+            1.0 - al / a,
+        )
     }
     fn lowshelf(fs: f64, f0: f64, gain_db: f64) -> Biquad {
         let (c, sn) = Self::w(fs, f0);
@@ -649,7 +1028,16 @@ fn filter(a: &mut Audio, s: usize, e: usize, make: impl Fn(f64) -> Biquad) -> Re
 }
 
 #[allow(clippy::too_many_arguments)]
-fn compress(a: &mut Audio, s: usize, e: usize, thr_db: f64, ratio: f64, att_ms: f64, rel_ms: f64, makeup_db: f64) {
+fn compress(
+    a: &mut Audio,
+    s: usize,
+    e: usize,
+    thr_db: f64,
+    ratio: f64,
+    att_ms: f64,
+    rel_ms: f64,
+    makeup_db: f64,
+) {
     let fs = a.sample_rate as f64;
     let att = coef(att_ms, fs);
     let rel = coef(rel_ms, fs);
@@ -661,7 +1049,11 @@ fn compress(a: &mut Audio, s: usize, e: usize, thr_db: f64, ratio: f64, att_ms: 
         let lvl = a.channels.iter().map(|c| c[i].abs()).fold(0f32, f32::max);
         env += (lvl - env) * if lvl > env { att } else { rel };
         let over = to_db(env) - thr;
-        let g = if over > 0.0 { db((-over * slope) as f64) } else { 1.0 } * makeup;
+        let g = if over > 0.0 {
+            db((-over * slope) as f64)
+        } else {
+            1.0
+        } * makeup;
         for c in &mut a.channels {
             c[i] *= g;
         }
@@ -675,7 +1067,11 @@ fn delay(a: &mut Audio, s: usize, e: usize, time_ms: f64, fb: f64, mix: f64, pin
     let n = a.frames();
     let nc = a.n_channels();
     let d = ((time_ms * 0.001 * fs).round() as usize).max(1);
-    let repeats = if fb <= 0.0 { 1.0 } else { (0.001f64.ln() / fb.ln()).ceil().clamp(1.0, 60.0) };
+    let repeats = if fb <= 0.0 {
+        1.0
+    } else {
+        (0.001f64.ln() / fb.ln()).ceil().clamp(1.0, 60.0)
+    };
     let end = (e + (repeats as usize) * d).min(n);
     let (fb, mix) = (fb as f32, mix as f32);
     let mut bufs = vec![vec![0f32; d]; nc];
@@ -741,11 +1137,20 @@ fn reverb(a: &mut Audio, s: usize, e: usize, room: f64, damping: f64, mix: f64, 
         let spread = 23 * ch;
         let mut combs: Vec<Comb> = COMBS
             .iter()
-            .map(|&l| Comb { buf: vec![0.0; ((l + spread) as f64 * scale) as usize], idx: 0, store: 0.0, feedback, damp })
+            .map(|&l| Comb {
+                buf: vec![0.0; ((l + spread) as f64 * scale) as usize],
+                idx: 0,
+                store: 0.0,
+                feedback,
+                damp,
+            })
             .collect();
         let mut aps: Vec<AllPass> = ALLP
             .iter()
-            .map(|&l| AllPass { buf: vec![0.0; ((l + spread) as f64 * scale) as usize], idx: 0 })
+            .map(|&l| AllPass {
+                buf: vec![0.0; ((l + spread) as f64 * scale) as usize],
+                idx: 0,
+            })
             .collect();
         for i in s..end {
             let x = if i < e { c[i] } else { 0.0 } * 0.015;
@@ -760,7 +1165,17 @@ fn reverb(a: &mut Audio, s: usize, e: usize, room: f64, damping: f64, mix: f64, 
 
 /// LFO-modulated delay line: chorus, flanger, vibrato.
 #[allow(clippy::too_many_arguments)]
-fn mod_delay(a: &mut Audio, s: usize, e: usize, base_ms: f64, depth_ms: f64, rate: f64, fb: f64, mix: f64, wet_only: bool) {
+fn mod_delay(
+    a: &mut Audio,
+    s: usize,
+    e: usize,
+    base_ms: f64,
+    depth_ms: f64,
+    rate: f64,
+    fb: f64,
+    mix: f64,
+    wet_only: bool,
+) {
     let fs = a.sample_rate as f64;
     let max_d = ((base_ms + depth_ms) * 0.001 * fs) as usize + 4;
     let (fb, mix) = (fb as f32, mix as f32);
@@ -824,8 +1239,12 @@ fn wsola(input: &[Vec<f32>], fs: u32, factor: f64) -> Vec<Vec<f32>> {
     let tol = (win / 8).max(8) as isize;
     let cmp = win / 2;
     let n_out = (n_in as f64 * factor).round() as usize;
-    let hann: Vec<f32> = (0..win).map(|i| 0.5 - 0.5 * (TAU * i as f32 / win as f32).cos()).collect();
-    let guide: Vec<f32> = (0..n_in).map(|i| input.iter().map(|c| c[i]).sum::<f32>()).collect();
+    let hann: Vec<f32> = (0..win)
+        .map(|i| 0.5 - 0.5 * (TAU * i as f32 / win as f32).cos())
+        .collect();
+    let guide: Vec<f32> = (0..n_in)
+        .map(|i| input.iter().map(|c| c[i]).sum::<f32>())
+        .collect();
     let mut out = vec![vec![0f32; n_out + win]; nc];
     let mut norm = vec![0f32; n_out + win];
     let mut prev: Option<usize> = None;
@@ -849,7 +1268,11 @@ fn wsola(input: &[Vec<f32>], fs: u32, factor: f64) -> Vec<Vec<f32>> {
                             continue;
                         }
                         let c = c as usize;
-                        let sc: f32 = guide[c..c + cmp].iter().zip(&guide[natural..natural + cmp]).map(|(x, y)| x * y).sum();
+                        let sc: f32 = guide[c..c + cmp]
+                            .iter()
+                            .zip(&guide[natural..natural + cmp])
+                            .map(|(x, y)| x * y)
+                            .sum();
                         if sc > best_score {
                             best_score = sc;
                             best = c as isize;
@@ -890,7 +1313,9 @@ mod tests {
     fn tone(frames: usize, nc: usize, f: f32) -> Audio {
         let mut a = Audio::new(8000, nc);
         for c in 0..nc {
-            a.channels[c] = (0..frames).map(|i| 0.5 * (TAU * f * i as f32 / 8000.0).sin()).collect();
+            a.channels[c] = (0..frames)
+                .map(|i| 0.5 * (TAU * f * i as f32 / 8000.0).sin())
+                .collect();
         }
         a
     }
@@ -910,8 +1335,17 @@ mod tests {
                 FxKind::ResampleFile | FxKind::TrimSilence => {} // may legitimately bail (same rate / nothing to trim)
                 _ => assert!(r.is_ok(), "{} failed: {:?}", i.name, r.err()),
             }
-            assert!(a.channels.iter().all(|c| c.iter().all(|v| v.is_finite())), "{} produced NaN", i.name);
-            assert_eq!(a.channels[0].len(), a.channels[1].len(), "{} unbalanced channels", i.name);
+            assert!(
+                a.channels.iter().all(|c| c.iter().all(|v| v.is_finite())),
+                "{} produced NaN",
+                i.name
+            );
+            assert_eq!(
+                a.channels[0].len(),
+                a.channels[1].len(),
+                "{} unbalanced channels",
+                i.name
+            );
         }
     }
 
@@ -961,7 +1395,10 @@ mod tests {
         let r = apply(FxKind::GenTone, &mut a, 0, 0, &[440.0, 0.25, -6.0]).unwrap();
         assert_eq!((r.new_end, a.frames()), (2000, n0 + 4000));
         let r = apply(FxKind::ResampleFile, &mut a, 0, 0, &[16000.0]).unwrap();
-        assert_eq!((r.new_end, a.sample_rate, a.frames()), ((n0 + 4000) * 2, 16000, (n0 + 4000) * 2));
+        assert_eq!(
+            (r.new_end, a.sample_rate, a.frames()),
+            ((n0 + 4000) * 2, 16000, (n0 + 4000) * 2)
+        );
     }
 
     #[test]
@@ -969,7 +1406,14 @@ mod tests {
         let mut a = tone(8000, 1, 220.0);
         apply(FxKind::Gain, &mut a, 0, 8000, &[6.0]).unwrap(); // peak ~1.0
         let before = a.peak(2000, 8000);
-        apply(FxKind::Compressor, &mut a, 0, 8000, &[-20.0, 4.0, 1.0, 100.0, 0.0]).unwrap();
+        apply(
+            FxKind::Compressor,
+            &mut a,
+            0,
+            8000,
+            &[-20.0, 4.0, 1.0, 100.0, 0.0],
+        )
+        .unwrap();
         assert!(a.peak(2000, 8000) < before * 0.6);
     }
 }

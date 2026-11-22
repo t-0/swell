@@ -1,16 +1,17 @@
 //! Editor state and input handling.
 
-use crate::audio::{self, fmt_time, AcidInfo, Audio, Peaks, WavMeta};
+use crate::audio::{self, AcidInfo, Audio, Peaks, WavMeta, fmt_time};
 use crate::beats::{self, BarHint, Grid};
 use crate::commands::{self, Cmd, KeyChord};
 use crate::config::{self, Config};
-use crate::player::KeepAlive;
-use std::collections::HashMap;
 use crate::fx::{self, FxKind};
+use crate::player::KeepAlive;
 use crate::player::Player;
-use anyhow::{anyhow, bail, Result};
+use crate::render::WaveRender;
+use anyhow::{Result, anyhow, bail};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::Rect;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 pub const SPEED_MIN: u32 = 50;
@@ -62,7 +63,10 @@ pub enum Mode {
     Prompt(Prompt),
     Palette(Palette),
     Help,
-    Confirm { question: String, action: ConfirmAction },
+    Confirm {
+        question: String,
+        action: ConfirmAction,
+    },
 }
 
 pub struct Msg {
@@ -86,6 +90,7 @@ struct WaveKey {
     fpc_bits: u64,
     width: u16,
     version: u64,
+    sub: usize,
 }
 
 pub struct App {
@@ -111,6 +116,8 @@ pub struct App {
     pub slider_area: Rect,
     /// Playback speed in percent, SPEED_MIN..=SPEED_MAX.
     pub speed: u32,
+    /// How the waveform is drawn.
+    pub render: WaveRender,
     needs_fit: bool,
     pub mode: Mode,
     pub msg: Option<Msg>,
@@ -158,6 +165,7 @@ impl App {
             wave_area: Rect::default(),
             slider_area: Rect::default(),
             speed: 100,
+            render: WaveRender::default(),
             needs_fit: true,
             mode: Mode::Normal,
             msg: None,
@@ -181,7 +189,10 @@ impl App {
             None => app.info("No file loaded. Press o to open a file, ? for help."),
         }
         if loaded.created {
-            app.info(format!("Created {} — keys, output keep-alive and defaults, commented", loaded.path.display()));
+            app.info(format!(
+                "Created {} — keys, output keep-alive and defaults, commented",
+                loaded.path.display()
+            ));
         }
         for w in &loaded.warnings {
             app.error(format!("settings: {w}"));
@@ -201,20 +212,25 @@ impl App {
             _ => KeepAlive::Tone,
         };
         self.player.set_keep_alive(mode);
-        self.player.set_keep_alive_levels(c.output.dither_db, c.output.tone_db, c.output.tone_hz);
+        self.player
+            .set_keep_alive_levels(c.output.dither_db, c.output.tone_db, c.output.tone_hz);
         self.speed = c.editor.speed.clamp(SPEED_MIN, SPEED_MAX);
         self.player.set_speed_pct(self.speed);
         if c.editor.snap && self.grid.is_some() {
             self.snap = true;
         }
         self.undo.truncate(c.editor.undo_levels.max(1));
+        self.render = WaveRender::parse(&c.editor.render).unwrap_or_default();
     }
 
     fn reload_config(&mut self) {
         let loaded = config::load();
         if !loaded.parsed {
             // keep the last good settings and bindings
-            self.error(format!("Settings unchanged, file has errors: {}", loaded.warnings.join("; ")));
+            self.error(format!(
+                "Settings unchanged, file has errors: {}",
+                loaded.warnings.join("; ")
+            ));
             return;
         }
         self.config = loaded.config;
@@ -224,7 +240,10 @@ impl App {
         if loaded.warnings.is_empty() {
             self.info(format!("Reloaded {}", self.config_path.display()));
         } else {
-            self.error(format!("Reloaded with problems: {}", loaded.warnings.join("; ")));
+            self.error(format!(
+                "Reloaded with problems: {}",
+                loaded.warnings.join("; ")
+            ));
         }
     }
 
@@ -245,11 +264,17 @@ impl App {
     // ----- messages -------------------------------------------------------
 
     pub fn info(&mut self, s: impl Into<String>) {
-        self.msg = Some(Msg { text: s.into(), is_error: false });
+        self.msg = Some(Msg {
+            text: s.into(),
+            is_error: false,
+        });
     }
 
     pub fn error(&mut self, s: impl Into<String>) {
-        self.msg = Some(Msg { text: s.into(), is_error: true });
+        self.msg = Some(Msg {
+            text: s.into(),
+            is_error: true,
+        });
     }
 
     fn report(&mut self, r: Result<String>) {
@@ -284,8 +309,17 @@ impl App {
         // Embedded markers / tempo (WAV only)
         let meta = audio::read_wav_meta(path);
         if let Some(acid) = meta.acid.filter(|a| a.bpm > 20.0 && a.bpm < 400.0) {
-            let anchor = meta.cues.iter().find(|(_, l)| l == "Bar 1").map(|(f, _)| *f as i64).unwrap_or(0);
-            self.grid = Some(Grid { bpm: acid.bpm as f64, anchor, beats_per_bar: acid.num.clamp(1, 32) as u32 });
+            let anchor = meta
+                .cues
+                .iter()
+                .find(|(_, l)| l == "Bar 1")
+                .map(|(f, _)| *f as i64)
+                .unwrap_or(0);
+            self.grid = Some(Grid {
+                bpm: acid.bpm as f64,
+                anchor,
+                beats_per_bar: acid.num.clamp(1, 32) as u32,
+            });
             note = format!(", {:.2} BPM from ACID chunk", acid.bpm);
         }
         let n = self.audio.frames();
@@ -323,7 +357,8 @@ impl App {
             });
             if with_markers {
                 for (k, f) in g.bars_in(0, n, rate, 1) {
-                    meta.cues.push((f.round() as usize, format!("Bar {}", g.bar_number(k, rate))));
+                    meta.cues
+                        .push((f.round() as usize, format!("Bar {}", g.bar_number(k, rate))));
                 }
             }
         }
@@ -342,7 +377,9 @@ impl App {
         if let Some(g) = self.grid {
             meta.acid = Some(AcidInfo {
                 bpm: g.bpm,
-                beats: (len as f64 / g.fpb(self.audio.sample_rate)).round().max(1.0) as u32,
+                beats: (len as f64 / g.fpb(self.audio.sample_rate))
+                    .round()
+                    .max(1.0) as u32,
                 num: g.beats_per_bar as u16,
                 denom: 4,
             });
@@ -372,13 +409,26 @@ impl App {
         if self.audio.is_empty() {
             bail!("nothing to save");
         }
-        audio::save_with(&self.audio, &path, self.save_bits(), &self.wav_meta(true), self.config.editor.mp3_kbps)?;
+        audio::save_with(
+            &self.audio,
+            &path,
+            self.save_bits(),
+            &self.wav_meta(true),
+            self.config.editor.mp3_kbps,
+        )?;
         self.path = Some(path.clone());
         self.dirty = false;
-        let is_wav = path.extension().and_then(|e| e.to_str()).map_or(false, |e| e.eq_ignore_ascii_case("wav"));
+        let is_wav = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .map_or(false, |e| e.eq_ignore_ascii_case("wav"));
         let extra = if is_wav {
             match self.grid {
-                Some(g) => format!(" with {:.2} BPM ACID tempo + markers{}", g.bpm, self.grid_warning().unwrap_or_default()),
+                Some(g) => format!(
+                    " with {:.2} BPM ACID tempo + markers{}",
+                    g.bpm,
+                    self.grid_warning().unwrap_or_default()
+                ),
                 None => String::new(),
             }
         } else if self.grid.is_some() {
@@ -391,7 +441,13 @@ impl App {
 
     fn export_selection(&mut self, path: PathBuf) -> Result<String> {
         let (s, e) = self.selection.ok_or_else(|| anyhow!("no selection"))?;
-        audio::save_with(&self.audio.slice(s, e), &path, self.save_bits(), &self.export_meta(e - s), self.config.editor.mp3_kbps)?;
+        audio::save_with(
+            &self.audio.slice(s, e),
+            &path,
+            self.save_bits(),
+            &self.export_meta(e - s),
+            self.config.editor.mp3_kbps,
+        )?;
         Ok(format!("Exported selection to {}", path.display()))
     }
 
@@ -403,7 +459,11 @@ impl App {
         bounds.extend(self.slices.iter().copied().filter(|&s| s > 0 && s < n));
         bounds.push(n);
         bounds.dedup();
-        let pieces: Vec<(usize, usize)> = bounds.windows(2).map(|w| (w[0], w[1])).filter(|(s, e)| e > s).collect();
+        let pieces: Vec<(usize, usize)> = bounds
+            .windows(2)
+            .map(|w| (w[0], w[1]))
+            .filter(|(s, e)| e > s)
+            .collect();
         if self.slices.is_empty() {
             bail!("no slice points: press m at each cut point first");
         }
@@ -414,15 +474,28 @@ impl App {
             let stem = p.file_stem().and_then(|s| s.to_str()).unwrap_or("piece");
             let ext = p.extension().and_then(|s| s.to_str()).unwrap_or("wav");
             let parent = p.parent().map(|d| d.to_path_buf()).unwrap_or_default();
-            parent.join(format!("{stem}_{{n}}.{ext}")).to_string_lossy().into_owned()
+            parent
+                .join(format!("{stem}_{{n}}.{ext}"))
+                .to_string_lossy()
+                .into_owned()
         };
         let mut last = PathBuf::new();
         for (i, (s, e)) in pieces.iter().enumerate() {
             let name = pattern.replace("{n}", &format!("{:02}", i + 1));
             last = PathBuf::from(&name);
-            audio::save_with(&self.audio.slice(*s, *e), &last, self.save_bits(), &self.export_meta(e - s), self.config.editor.mp3_kbps)?;
+            audio::save_with(
+                &self.audio.slice(*s, *e),
+                &last,
+                self.save_bits(),
+                &self.export_meta(e - s),
+                self.config.editor.mp3_kbps,
+            )?;
         }
-        Ok(format!("Exported {} pieces, last: {}", pieces.len(), last.display()))
+        Ok(format!(
+            "Exported {} pieces, last: {}",
+            pieces.len(),
+            last.display()
+        ))
     }
 
     fn default_export_pattern(&self) -> String {
@@ -431,7 +504,10 @@ impl App {
                 let stem = p.file_stem().and_then(|s| s.to_str()).unwrap_or("piece");
                 let ext = p.extension().and_then(|s| s.to_str()).unwrap_or("wav");
                 let parent = p.parent().map(|d| d.to_path_buf()).unwrap_or_default();
-                parent.join(format!("{stem}_{{n}}.{ext}")).to_string_lossy().into_owned()
+                parent
+                    .join(format!("{stem}_{{n}}.{ext}"))
+                    .to_string_lossy()
+                    .into_owned()
             }
             None => "piece_{n}.wav".to_string(),
         }
@@ -451,13 +527,22 @@ impl App {
     fn clamp_marks(&mut self) {
         let n = self.audio.frames();
         self.cursor = self.cursor.min(n);
-        self.selection = self.selection.map(|(s, e)| (s.min(n), e.min(n))).filter(|(s, e)| e > s);
-        self.loop_range = self.loop_range.map(|(s, e)| (s.min(n), e.min(n))).filter(|(s, e)| e > s);
+        self.selection = self
+            .selection
+            .map(|(s, e)| (s.min(n), e.min(n)))
+            .filter(|(s, e)| e > s);
+        self.loop_range = self
+            .loop_range
+            .map(|(s, e)| (s.min(n), e.min(n)))
+            .filter(|(s, e)| e > s);
         self.slices.retain(|&s| s > 0 && s < n);
         self.slices.sort_unstable();
         self.slices.dedup();
         self.bar_start = self.bar_start.map(|p| p.min(n));
-        self.bar_end = self.bar_end.filter(|&e| Some(e) > self.bar_start).map(|p| p.min(n));
+        self.bar_end = self
+            .bar_end
+            .filter(|&e| Some(e) > self.bar_start)
+            .map(|p| p.min(n));
     }
 
     fn snapshot(&self) -> Snap {
@@ -528,8 +613,19 @@ impl App {
                 *p -= len;
             }
         }
-        let adj = |p: usize| if p < s { p } else if p < e { s } else { p - len };
-        self.loop_range = self.loop_range.map(|(a, b)| (adj(a), adj(b))).filter(|(a, b)| b > a);
+        let adj = |p: usize| {
+            if p < s {
+                p
+            } else if p < e {
+                s
+            } else {
+                p - len
+            }
+        };
+        self.loop_range = self
+            .loop_range
+            .map(|(a, b)| (adj(a), adj(b)))
+            .filter(|(a, b)| b > a);
         if let Some(g) = &mut self.grid {
             g.anchor = adj(g.anchor.max(0) as usize) as i64;
         }
@@ -558,7 +654,10 @@ impl App {
         match self.selection {
             Some((s, e)) => {
                 self.clipboard = Some(self.audio.slice(s, e));
-                self.info(format!("Copied {}", fmt_time(e - s, self.audio.sample_rate)));
+                self.info(format!(
+                    "Copied {}",
+                    fmt_time(e - s, self.audio.sample_rate)
+                ));
             }
             None => self.error("Nothing selected"),
         }
@@ -575,7 +674,10 @@ impl App {
         self.cursor = s;
         self.selection = None;
         self.after_edit();
-        self.info(format!("{verb} {}", fmt_time(e - s, self.audio.sample_rate)));
+        self.info(format!(
+            "{verb} {}",
+            fmt_time(e - s, self.audio.sample_rate)
+        ));
     }
 
     fn cut(&mut self) {
@@ -606,7 +708,10 @@ impl App {
         self.cursor = at;
         self.selection = Some((at, at + clip.frames()));
         self.after_edit();
-        self.info(format!("Pasted {}", fmt_time(clip.frames(), self.audio.sample_rate)));
+        self.info(format!(
+            "Pasted {}",
+            fmt_time(clip.frames(), self.audio.sample_rate)
+        ));
     }
 
     fn trim(&mut self) {
@@ -677,7 +782,13 @@ impl App {
             .params
             .iter()
             .enumerate()
-            .map(|(i, p)| params.get(i).copied().unwrap_or(p.default).clamp(p.min, p.max))
+            .map(|(i, p)| {
+                params
+                    .get(i)
+                    .copied()
+                    .unwrap_or(p.default)
+                    .clamp(p.min, p.max)
+            })
             .collect();
         self.push_undo();
         match fx::apply(kind, &mut self.audio, s, e, &prm) {
@@ -698,8 +809,23 @@ impl App {
                     self.selection = Some((s, out.new_end)).filter(|(a, b)| b > a);
                 }
                 self.sel_anchor = None;
-                let shown: Vec<String> = info.params.iter().zip(&prm).map(|(p, v)| format!("{}={}", p.name.split(' ').next().unwrap_or(""), trim_num(*v))).collect();
-                let args = if shown.is_empty() { String::new() } else { format!(" [{}]", shown.join(", ")) };
+                let shown: Vec<String> = info
+                    .params
+                    .iter()
+                    .zip(&prm)
+                    .map(|(p, v)| {
+                        format!(
+                            "{}={}",
+                            p.name.split(' ').next().unwrap_or(""),
+                            trim_num(*v)
+                        )
+                    })
+                    .collect();
+                let args = if shown.is_empty() {
+                    String::new()
+                } else {
+                    format!(" [{}]", shown.join(", "))
+                };
                 self.after_edit();
                 self.info(format!("{} → {}{}{}", info.name, where_, args, out.note));
             }
@@ -716,7 +842,13 @@ impl App {
             .params
             .iter()
             .map(|p| {
-                let d = if kind == FxKind::ChangeSpeed { self.speed as f64 } else if kind == FxKind::ResampleFile { self.audio.sample_rate as f64 } else { p.default };
+                let d = if kind == FxKind::ChangeSpeed {
+                    self.speed as f64
+                } else if kind == FxKind::ResampleFile {
+                    self.audio.sample_rate as f64
+                } else {
+                    p.default
+                };
                 trim_num(d)
             })
             .collect();
@@ -734,21 +866,39 @@ impl App {
             return;
         }
         let tol = self.fpc.max(1.0) as usize;
-        if let Some(i) = self.slices.iter().position(|&p| p.abs_diff(self.cursor) <= tol) {
+        if let Some(i) = self
+            .slices
+            .iter()
+            .position(|&p| p.abs_diff(self.cursor) <= tol)
+        {
             self.slices.remove(i);
             self.info("Removed slice point");
         } else {
             self.slices.push(self.cursor);
             self.slices.sort_unstable();
-            self.info(format!("Slice point {} at {} ({} pieces)", self.slices.len(), fmt_time(self.cursor, self.audio.sample_rate), self.slices.len() + 1));
+            self.info(format!(
+                "Slice point {} at {} ({} pieces)",
+                self.slices.len(),
+                fmt_time(self.cursor, self.audio.sample_rate),
+                self.slices.len() + 1
+            ));
         }
     }
 
     fn jump_slice(&mut self, forward: bool) {
         let target = if forward {
-            self.slices.iter().copied().find(|&p| p > self.cursor).or(Some(self.audio.frames()))
+            self.slices
+                .iter()
+                .copied()
+                .find(|&p| p > self.cursor)
+                .or(Some(self.audio.frames()))
         } else {
-            self.slices.iter().rev().copied().find(|&p| p < self.cursor).or(Some(0))
+            self.slices
+                .iter()
+                .rev()
+                .copied()
+                .find(|&p| p < self.cursor)
+                .or(Some(0))
         };
         if let Some(t) = target {
             self.cursor = t;
@@ -782,8 +932,14 @@ impl App {
     // ----- beat grid ------------------------------------------------------
 
     fn detect_beats(&mut self) {
-        let bpb = self.grid.map(|g| g.beats_per_bar).unwrap_or(self.config.editor.beats_per_bar.clamp(1, 32));
-        let hint = self.bar_start.map(|start| BarHint { start, end: self.bar_end });
+        let bpb = self
+            .grid
+            .map(|g| g.beats_per_bar)
+            .unwrap_or(self.config.editor.beats_per_bar.clamp(1, 32));
+        let hint = self.bar_start.map(|start| BarHint {
+            start,
+            end: self.bar_end,
+        });
         match beats::detect(&self.audio, bpb, hint) {
             Ok(d) => {
                 let rate = self.audio.sample_rate;
@@ -818,7 +974,8 @@ impl App {
                 self.apply_bar_marks();
             }
             Some(_) => self.error("Bar end must be after the bar start"),
-            None => self.error("Mark the bar start first (b at the downbeat), or g to use the selection"),
+            None => self
+                .error("Mark the bar start first (b at the downbeat), or g to use the selection"),
         }
     }
 
@@ -885,7 +1042,13 @@ impl App {
         let rate = self.audio.sample_rate;
         match self.grid.as_mut() {
             Some(g) => g.bpm = bpm,
-            None => self.grid = Some(Grid { bpm, anchor: self.cursor as i64, beats_per_bar: self.config.editor.beats_per_bar.clamp(1, 32) }),
+            None => {
+                self.grid = Some(Grid {
+                    bpm,
+                    anchor: self.cursor as i64,
+                    beats_per_bar: self.config.editor.beats_per_bar.clamp(1, 32),
+                })
+            }
         }
         let _ = rate;
         self.grid_msg();
@@ -953,16 +1116,28 @@ impl App {
         self.after_edit();
         let total_bars = (self.audio.frames() as f64 / bar).round();
         let lead_note = if delta > 0 {
-            format!("padded {} ms of lead-in", (delta as f64 / rate as f64 * 1000.0).round())
+            format!(
+                "padded {} ms of lead-in",
+                (delta as f64 / rate as f64 * 1000.0).round()
+            )
         } else if delta < 0 {
-            format!("trimmed {} ms of lead-in", (-delta as f64 / rate as f64 * 1000.0).round())
+            format!(
+                "trimmed {} ms of lead-in",
+                (-delta as f64 / rate as f64 * 1000.0).round()
+            )
         } else {
             "lead-in already exact".into()
         };
         let end_note = if padded > 0 {
-            format!("padded {} ms at the end", (padded as f64 / rate as f64 * 1000.0).round())
+            format!(
+                "padded {} ms at the end",
+                (padded as f64 / rate as f64 * 1000.0).round()
+            )
         } else if trimmed > 0 {
-            format!("trimmed {} ms at the end", (trimmed as f64 / rate as f64 * 1000.0).round())
+            format!(
+                "trimmed {} ms at the end",
+                (trimmed as f64 / rate as f64 * 1000.0).round()
+            )
         } else {
             "end already exact".into()
         };
@@ -989,7 +1164,11 @@ impl App {
         self.selection = Some((start, end.min(n))).filter(|(s, e)| e > s);
         self.cursor = start;
         self.sel_anchor = None;
-        self.info(format!("Selected {} bars from {}", trim_num(bars), fmt_time(start, rate)));
+        self.info(format!(
+            "Selected {} bars from {}",
+            trim_num(bars),
+            fmt_time(start, rate)
+        ));
     }
 
     fn slice_at_grid(&mut self, every_bars: Option<i64>) {
@@ -1000,12 +1179,24 @@ impl App {
         let rate = self.audio.sample_rate;
         let n = self.audio.frames();
         let pts: Vec<usize> = match every_bars {
-            Some(every) => g.bars_in(0, n, rate, every).into_iter().map(|(_, f)| f.round() as usize).collect(),
-            None => g.beats_in(0, n, rate).into_iter().map(|(_, f)| f.round() as usize).collect(),
+            Some(every) => g
+                .bars_in(0, n, rate, every)
+                .into_iter()
+                .map(|(_, f)| f.round() as usize)
+                .collect(),
+            None => g
+                .beats_in(0, n, rate)
+                .into_iter()
+                .map(|(_, f)| f.round() as usize)
+                .collect(),
         };
         self.slices = pts.into_iter().filter(|&p| p > 0 && p < n).collect();
         self.slices.dedup();
-        self.info(format!("{} slice points → {} pieces; press e to export them", self.slices.len(), self.slices.len() + 1));
+        self.info(format!(
+            "{} slice points → {} pieces; press e to export them",
+            self.slices.len(),
+            self.slices.len() + 1
+        ));
     }
 
     fn export_markers(&mut self, path: PathBuf) -> Result<String> {
@@ -1018,12 +1209,20 @@ impl App {
             let label = if g.is_downbeat(k) {
                 format!("Bar {}", g.bar_number(k, rate))
             } else {
-                format!("{}.{}", g.bar_number(k, rate), k.rem_euclid(g.beats_per_bar as i64) + 1)
+                format!(
+                    "{}.{}",
+                    g.bar_number(k, rate),
+                    k.rem_euclid(g.beats_per_bar as i64) + 1
+                )
             };
             out += &format!("{t:.6}\t{t:.6}\t{label}\n");
         }
         std::fs::write(&path, out)?;
-        Ok(format!("Wrote {} beat labels to {} (Audacity: File → Import → Labels)", g.beats_in(0, n, rate).len(), path.display()))
+        Ok(format!(
+            "Wrote {} beat labels to {} (Audacity: File → Import → Labels)",
+            g.beats_in(0, n, rate).len(),
+            path.display()
+        ))
     }
 
     fn num_prompt(&mut self, cmd: NumCmd) {
@@ -1031,7 +1230,13 @@ impl App {
         let rate = self.audio.sample_rate;
         let (label, default) = match cmd {
             NumCmd::Bpm => ("Grid BPM", trim_num(g.map(|g| g.bpm).unwrap_or(120.0))),
-            NumCmd::BeatsPerBar => ("Beats per bar", trim_num(g.map(|g| g.beats_per_bar as f64).unwrap_or(self.config.editor.beats_per_bar as f64))),
+            NumCmd::BeatsPerBar => (
+                "Beats per bar",
+                trim_num(
+                    g.map(|g| g.beats_per_bar as f64)
+                        .unwrap_or(self.config.editor.beats_per_bar as f64),
+                ),
+            ),
             NumCmd::Offset => ("Shift grid by ms (negative = earlier)", "0".to_string()),
             NumCmd::Conform => (
                 "Conform — lead-in bars, end to (1 = whole bar, 0 = whole beat)",
@@ -1055,12 +1260,21 @@ impl App {
                 let bpb = a.unwrap_or(4.0).clamp(1.0, 32.0) as u32;
                 match self.grid.as_mut() {
                     Some(g) => g.beats_per_bar = bpb,
-                    None => self.grid = Some(Grid { bpm: 120.0, anchor: 0, beats_per_bar: bpb }),
+                    None => {
+                        self.grid = Some(Grid {
+                            bpm: 120.0,
+                            anchor: 0,
+                            beats_per_bar: bpb,
+                        })
+                    }
                 }
                 self.grid_msg();
             }
             NumCmd::Offset => self.grid_shift_ms(a.unwrap_or(0.0)),
-            NumCmd::Conform => self.conform_bars(a.unwrap_or(0.0).round() as i64, v.get(1).copied().unwrap_or(1.0) >= 0.5),
+            NumCmd::Conform => self.conform_bars(
+                a.unwrap_or(0.0).round() as i64,
+                v.get(1).copied().unwrap_or(1.0) >= 0.5,
+            ),
             NumCmd::SelectBars => self.select_bars(a.unwrap_or(4.0)),
             NumCmd::SliceBars => self.slice_at_grid(Some(a.unwrap_or(1.0).max(1.0) as i64)),
         }
@@ -1078,7 +1292,11 @@ impl App {
             (Some(sel), Some(lp)) if sel == lp => (sel.0, sel.1, Some(lp)),
             (Some((s, e)), _) => (s, e, None),
             (None, Some((ls, le))) => {
-                let start = if self.cursor >= ls && self.cursor < le { self.cursor } else { ls };
+                let start = if self.cursor >= ls && self.cursor < le {
+                    self.cursor
+                } else {
+                    ls
+                };
                 (start, le, Some((ls, le)))
             }
             (None, None) => (self.cursor.min(n.saturating_sub(1)), n, None),
@@ -1264,7 +1482,13 @@ impl App {
         if extend {
             let anchor = match (self.sel_anchor, self.selection) {
                 (Some(a), Some(_)) => a,
-                (_, Some((s, e))) => if self.cursor == s { e } else { s },
+                (_, Some((s, e))) => {
+                    if self.cursor == s {
+                        e
+                    } else {
+                        s
+                    }
+                }
                 _ => self.cursor,
             };
             self.sel_anchor = Some(anchor);
@@ -1278,23 +1502,29 @@ impl App {
 
     // ----- waveform cache -------------------------------------------------
 
+    /// Min/max per channel for each of the `width() * sub` pixel columns,
+    /// `sub` being how many pixels wide the render style splits a cell.
     pub fn wave_columns(&mut self) -> &Vec<Vec<(f32, f32)>> {
+        let sub = self.render.grid().0.max(1);
         let key = WaveKey {
             view_start: self.view_start,
             fpc_bits: self.fpc.to_bits(),
             width: self.wave_area.width,
             version: self.version,
+            sub,
         };
         let stale = self.wave_cache.as_ref().is_none_or(|(k, _)| *k != key);
         if stale {
-            let w = self.width();
+            let w = self.width() * sub;
             let n = self.audio.frames();
+            let step = self.fpc / sub as f64;
+            let at = |j: usize| (self.view_start as f64 + j as f64 * step) as usize;
             let cols: Vec<Vec<(f32, f32)>> = (0..self.audio.n_channels())
                 .map(|ch| {
                     (0..w)
                         .map(|c| {
-                            let s = self.col_to_frame(c);
-                            let e = self.col_to_frame(c + 1);
+                            let s = at(c);
+                            let e = at(c + 1);
                             if s >= n {
                                 (f32::NAN, f32::NAN)
                             } else {
@@ -1352,7 +1582,10 @@ impl App {
             }
             PromptKind::FxParams(_) | PromptKind::Numbers(_) => {
                 let mut vals = Vec::new();
-                for tok in input.split(|c: char| c == ',' || c.is_whitespace()).filter(|t| !t.is_empty()) {
+                for tok in input
+                    .split(|c: char| c == ',' || c.is_whitespace())
+                    .filter(|t| !t.is_empty())
+                {
                     match tok.parse::<f64>() {
                         Ok(v) => vals.push(v),
                         Err(_) => {
@@ -1375,7 +1608,11 @@ impl App {
     }
 
     fn open_palette(&mut self) {
-        self.mode = Mode::Palette(Palette { input: String::new(), selected: 0, matches: commands::search("") });
+        self.mode = Mode::Palette(Palette {
+            input: String::new(),
+            selected: 0,
+            matches: commands::search(""),
+        });
     }
 
     /// Execute a command. `from_palette` makes effects with parameters ask for them.
@@ -1396,15 +1633,25 @@ impl App {
             }
             Cmd::Save => self.save(),
             Cmd::SaveAs => {
-                let cur = self.path.as_ref().map(|p| p.to_string_lossy().into_owned()).unwrap_or_default();
+                let cur = self
+                    .path
+                    .as_ref()
+                    .map(|p| p.to_string_lossy().into_owned())
+                    .unwrap_or_default();
                 self.open_prompt(PromptKind::SaveAs, "Save as (.wav or .mp3)", cur);
             }
             Cmd::ExportPieces => {
                 if self.slices.is_empty() {
-                    self.error("No slice points: press m at each cut point, then e to export pieces");
+                    self.error(
+                        "No slice points: press m at each cut point, then e to export pieces",
+                    );
                 } else {
                     let def = self.default_export_pattern();
-                    self.open_prompt(PromptKind::ExportPieces, "Export pieces to ({n} = piece number)", def);
+                    self.open_prompt(
+                        PromptKind::ExportPieces,
+                        "Export pieces to ({n} = piece number)",
+                        def,
+                    );
                 }
             }
             Cmd::ExportSelection => {
@@ -1413,10 +1660,16 @@ impl App {
                 } else {
                     let def = match &self.path {
                         Some(p) => {
-                            let stem = p.file_stem().and_then(|s| s.to_str()).unwrap_or("selection");
+                            let stem = p
+                                .file_stem()
+                                .and_then(|s| s.to_str())
+                                .unwrap_or("selection");
                             let ext = p.extension().and_then(|s| s.to_str()).unwrap_or("wav");
                             let parent = p.parent().map(|d| d.to_path_buf()).unwrap_or_default();
-                            parent.join(format!("{stem}_sel.{ext}")).to_string_lossy().into_owned()
+                            parent
+                                .join(format!("{stem}_sel.{ext}"))
+                                .to_string_lossy()
+                                .into_owned()
                         }
                         None => "selection.wav".into(),
                     };
@@ -1445,13 +1698,21 @@ impl App {
             Cmd::SelStartHere => {
                 let n = self.audio.frames();
                 let c = self.cursor;
-                let e = self.selection.map(|(_, e)| e).filter(|&e| e > c).unwrap_or(n);
+                let e = self
+                    .selection
+                    .map(|(_, e)| e)
+                    .filter(|&e| e > c)
+                    .unwrap_or(n);
                 self.selection = Some((c, e)).filter(|(s, e)| e > s);
                 self.sel_anchor = None;
             }
             Cmd::SelEndHere => {
                 let c = self.cursor;
-                let s = self.selection.map(|(s, _)| s).filter(|&s| s < c).unwrap_or(0);
+                let s = self
+                    .selection
+                    .map(|(s, _)| s)
+                    .filter(|&s| s < c)
+                    .unwrap_or(0);
                 self.selection = Some((s, c)).filter(|(s, e)| e > s);
                 self.sel_anchor = None;
             }
@@ -1493,6 +1754,10 @@ impl App {
                 self.player.set_keep_alive(mode);
                 self.info(format!("Output keep-alive {}", mode.label()));
             }
+            Cmd::RenderCycle => {
+                self.render = self.render.next();
+                self.info(format!("Waveform rendering: {}", self.render.name()));
+            }
             Cmd::DetectBeats => self.detect_beats(),
             Cmd::GridSetBpm => self.num_prompt(NumCmd::Bpm),
             Cmd::GridBarStart => self.mark_bar_start(),
@@ -1524,10 +1789,16 @@ impl App {
             }
             Cmd::SnapToggle => {
                 if self.grid.is_none() {
-                    self.error("No beat grid to snap to: mark a bar (b/B or g) or press A to analyse");
+                    self.error(
+                        "No beat grid to snap to: mark a bar (b/B or g) or press A to analyse",
+                    );
                 } else {
                     self.snap = !self.snap;
-                    self.info(if self.snap { "Snap on: ← → step beats, Ctrl ← → step bars, clicks snap" } else { "Snap off" });
+                    self.info(if self.snap {
+                        "Snap on: ← → step beats, Ctrl ← → step bars, clicks snap"
+                    } else {
+                        "Snap off"
+                    });
                 }
             }
             Cmd::ConformBars => self.num_prompt(NumCmd::Conform),
@@ -1542,11 +1813,18 @@ impl App {
                         Some(p) => {
                             let stem = p.file_stem().and_then(|s| s.to_str()).unwrap_or("markers");
                             let parent = p.parent().map(|d| d.to_path_buf()).unwrap_or_default();
-                            parent.join(format!("{stem}_markers.txt")).to_string_lossy().into_owned()
+                            parent
+                                .join(format!("{stem}_markers.txt"))
+                                .to_string_lossy()
+                                .into_owned()
                         }
                         None => "markers.txt".into(),
                     };
-                    self.open_prompt(PromptKind::ExportMarkers, "Export markers to (.txt, Audacity label format)", def);
+                    self.open_prompt(
+                        PromptKind::ExportMarkers,
+                        "Export markers to (.txt, Audacity label format)",
+                        def,
+                    );
                 }
             }
             Cmd::Fx(kind) => {
@@ -1562,7 +1840,9 @@ impl App {
             Cmd::ReloadConfig => self.reload_config(),
             Cmd::ShowConfigPath => {
                 let p = self.config_path.display().to_string();
-                self.info(format!("Settings file: {p} — edit it, then run Reload settings"));
+                self.info(format!(
+                    "Settings file: {p} — edit it, then run Reload settings"
+                ));
             }
         }
     }
@@ -1595,7 +1875,9 @@ impl App {
         match mode {
             Mode::Help => {}
             Mode::Confirm { question, action } => match key.code {
-                KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => self.run_confirm(action),
+                KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
+                    self.run_confirm(action)
+                }
                 KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc | KeyCode::Char('q') => {
                     self.info("Cancelled");
                 }
@@ -1615,8 +1897,11 @@ impl App {
                         self.mode = Mode::Prompt(p);
                     }
                     KeyCode::Char('w') if ctrl => {
-                        let trimmed = p.input.trim_end_matches(|c: char| !c.is_whitespace() && c != '/');
-                        let trimmed = trimmed.trim_end_matches(|c: char| c.is_whitespace() || c == '/');
+                        let trimmed = p
+                            .input
+                            .trim_end_matches(|c: char| !c.is_whitespace() && c != '/');
+                        let trimmed =
+                            trimmed.trim_end_matches(|c: char| c.is_whitespace() || c == '/');
                         p.input.truncate(trimmed.len());
                         self.mode = Mode::Prompt(p);
                     }
@@ -1640,7 +1925,9 @@ impl App {
                         return;
                     }
                     KeyCode::Up => pal.selected = pal.selected.saturating_sub(1),
-                    KeyCode::Char('p') | KeyCode::Char('k') if ctrl => pal.selected = pal.selected.saturating_sub(1),
+                    KeyCode::Char('p') | KeyCode::Char('k') if ctrl => {
+                        pal.selected = pal.selected.saturating_sub(1)
+                    }
                     KeyCode::Down => pal.selected += 1,
                     KeyCode::Char('n') | KeyCode::Char('j') if ctrl => pal.selected += 1,
                     KeyCode::PageUp => pal.selected = pal.selected.saturating_sub(10),
@@ -1677,7 +1964,11 @@ impl App {
         let shift = key.modifiers.contains(KeyModifiers::SHIFT);
         let alt = key.modifiers.contains(KeyModifiers::ALT);
         let col_frames = self.fpc.max(1.0) as i64;
-        let step = if ctrl || alt { col_frames * 10 } else { col_frames };
+        let step = if ctrl || alt {
+            col_frames * 10
+        } else {
+            col_frames
+        };
 
         // Keys that need modifier/context handling the command table can't express.
         let snap_grid = if self.snap { self.grid } else { None };
@@ -1685,7 +1976,13 @@ impl App {
             KeyCode::Left | KeyCode::Right if snap_grid.is_some() => {
                 let g = snap_grid.unwrap();
                 let dir = if key.code == KeyCode::Left { -1 } else { 1 };
-                let t = g.step(self.cursor, dir, ctrl || alt, self.audio.sample_rate, self.audio.frames());
+                let t = g.step(
+                    self.cursor,
+                    dir,
+                    ctrl || alt,
+                    self.audio.sample_rate,
+                    self.audio.frames(),
+                );
                 return self.set_cursor(t, shift);
             }
             KeyCode::Left => return self.move_cursor(-step, shift),
@@ -1695,12 +1992,18 @@ impl App {
             KeyCode::Up => return self.zoom_cursor(0.5),
             KeyCode::Down => return self.zoom_cursor(2.0),
             KeyCode::Esc => {
-                return if self.transport_active() { self.stop() } else { self.run_cmd(Cmd::ClearSelection, false) };
+                return if self.transport_active() {
+                    self.stop()
+                } else {
+                    self.run_cmd(Cmd::ClearSelection, false)
+                };
             }
             _ => {}
         }
 
-        let Some(&cmd) = self.keymap.get(&KeyChord::from_event(&key)) else { return };
+        let Some(&cmd) = self.keymap.get(&KeyChord::from_event(&key)) else {
+            return;
+        };
         self.run_cmd(cmd, false);
     }
 
@@ -1711,9 +2014,13 @@ impl App {
         let area = self.wave_area;
         let in_x = m.column >= area.x && m.column < area.x + area.width;
         let in_y = m.row + 1 >= area.y && m.row <= area.y + area.height; // allow marker/timeline rows
-        let col = m.column.saturating_sub(area.x).min(area.width.saturating_sub(1)) as usize;
+        let col = m
+            .column
+            .saturating_sub(area.x)
+            .min(area.width.saturating_sub(1)) as usize;
         let sl = self.slider_area;
-        let on_slider = sl.width > 1 && m.row == sl.y && m.column >= sl.x && m.column < sl.x + sl.width;
+        let on_slider =
+            sl.width > 1 && m.row == sl.y && m.column >= sl.x && m.column < sl.x + sl.width;
         match m.kind {
             MouseEventKind::Down(MouseButton::Left) if on_slider => {
                 self.slider_drag = true;
@@ -1767,14 +2074,20 @@ impl App {
 
 /// Just the file name, for short status messages.
 pub fn file_name(p: &Path) -> String {
-    p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| p.display().to_string())
+    p.file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| p.display().to_string())
 }
 
 /// Format a number for prompts: no trailing zeros.
 pub fn trim_num(v: f64) -> String {
     let s = format!("{v:.3}");
     let s = s.trim_end_matches('0').trim_end_matches('.');
-    if s.is_empty() || s == "-" { "0".into() } else { s.to_string() }
+    if s.is_empty() || s == "-" {
+        "0".into()
+    } else {
+        s.to_string()
+    }
 }
 
 pub fn expand_tilde(s: &str) -> PathBuf {
